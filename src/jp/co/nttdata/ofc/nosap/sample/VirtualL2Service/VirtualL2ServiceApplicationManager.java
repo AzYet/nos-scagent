@@ -4,6 +4,8 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 
+import com.nsfocus.securitycontrolleragent.restlet.RestApiServer;
+
 import jp.co.nttdata.ofc.nos.api.INOSApplication;
 import jp.co.nttdata.ofc.nos.api.INOSApplicationManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.ThreadGenerator;
@@ -21,6 +23,13 @@ public class VirtualL2ServiceApplicationManager implements INOSApplicationManage
 	@Override
 	public boolean start() {
 		// TODO 自動生成されたメソッド・スタブ
+		System.out.println("method start() is called");
+		try {
+			RestApiServer.runServer();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		try{
 			Operator operator = new Operator();
 			IOperator stub = (IOperator)UnicastRemoteObject.exportObject(operator, 0);

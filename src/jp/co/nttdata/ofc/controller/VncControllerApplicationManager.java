@@ -4,6 +4,8 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 
+import com.nsfocus.securitycontrolleragent.restlet.RestApiServer;
+
 import jp.co.nttdata.ofc.nos.api.INOSApplication;
 import jp.co.nttdata.ofc.nos.api.INOSApplicationManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.VirtualL2ServiceApplication;
@@ -67,6 +69,15 @@ public class VncControllerApplicationManager implements INOSApplicationManager
 		Thread t = new Thread(new ThreadGenerator());
 		t.start();
 
+		System.out.println("method start() is called");
+		try {
+			RestApiServer.runServer();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		System.out.println("Rest Server is running , non-block process!");
+		
 		System.out.println("Start");
 		return true;
 	}
