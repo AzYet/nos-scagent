@@ -4,10 +4,10 @@ import jp.co.nttdata.ofc.common.util.MacAddress;
 import jp.co.nttdata.ofc.common.util.Translator;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.NosFactory;
 import jp.co.nttdata.ofc.protocol.packet.EthernetPDU;
-import jp.co.nttdata.ofc.protocol.packet.EthernetPDU.EtherType;
 import jp.co.nttdata.ofc.protocol.packet.LldpPDU;
-import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 import jp.co.nttdata.ofc.protocol.packet.TlvPDU;
+import jp.co.nttdata.ofc.protocol.packet.EthernetPDU.EtherType;
+import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 
 public class LldpPacketGenerator {
 	public static final byte[] LLDP_NTTDATA_PACKET_ID = new byte[] { 0x6E, 0x74, 0x74, 0x64, 0x61, 0x74, 0x61, 0x2D, 0x63, 0x6F, 0x72, 0x70 };

@@ -37,8 +37,8 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Trunk;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.Operator;
 import jp.co.nttdata.ofc.protocol.packet.EthernetPDU;
 import jp.co.nttdata.ofc.protocol.packet.LldpPDU;
-import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 import jp.co.nttdata.ofc.protocol.packet.TlvPDU;
+import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 
 public class VirtualL2ServiceApplication implements INOSApplication{
 	private TopologyManager topologyManager;

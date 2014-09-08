@@ -4,14 +4,14 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 
-import com.nsfocus.securitycontrolleragent.restlet.RestApiServer;
-
 import jp.co.nttdata.ofc.nos.api.INOSApplication;
 import jp.co.nttdata.ofc.nos.api.INOSApplicationManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.ThreadGenerator;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.IOperator;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.Operator;
+
+import com.nsfocus.securitycontrolleragent.restlet.RestApiServer;
 
 public class VirtualL2ServiceApplicationManager implements INOSApplicationManager{
 	private TopologyManager topologyManager;
