@@ -2,6 +2,7 @@ package jp.co.nttdata.ofc.nosap.sample.VirtualL2Service;
 
 import java.util.Arrays;
 import java.util.LinkedList;
+import java.util.Map;
 
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
 import jp.co.nttdata.ofc.common.util.MacAddress;
@@ -22,8 +23,6 @@ import jp.co.nttdata.ofc.nos.api.vo.event.GetConfigReplyEventVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.PacketInEventVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.PortStatusEventVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.QueueGetConfigReplyEventVO;
-import jp.co.nttdata.ofc.nos.common.constant.OFPConstant.OFPort;
-import jp.co.nttdata.ofc.nos.common.constant.OFPConstant.OFWildCard;
 import jp.co.nttdata.ofc.nos.ofp.common.Flow;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.NosFactory;
@@ -40,10 +39,13 @@ import jp.co.nttdata.ofc.protocol.packet.LldpPDU;
 import jp.co.nttdata.ofc.protocol.packet.TlvPDU;
 import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 
+import com.nsfocus.scagent.device.DeviceManager;
+
 public class VirtualL2ServiceApplication implements INOSApplication{
 	private TopologyManager topologyManager;
 	private MacAddress lldpMacAddress;
 	private Operator operator;
+	Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
 
 	public VirtualL2ServiceApplication()
 	{
@@ -101,7 +103,7 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 		
 
 		IFlowModifier flowModifier = null;
-		try {
+/*		try {
 			//flow.wildCards = OFWildCard.ALL & ~ OFWildCard.SRC_PORT & ~ OFWildCard.DST_MACADDR;
 			//flow.dstIpaddr = new IpAddress("101.0.0.0");
 			//flow.srcPort=233;
@@ -118,11 +120,11 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 			flowModifier.addOutputAction(OFPort.ALL, 0);
 			flowModifier.send();
 			
-			System.out.println("Sent "+ flow);
+			System.out.println("Sent broadcast flow");
 		} catch (Exception e) {
 			e.printStackTrace();
 			System.out.println(e.getMessage());
-		}
+		}*/
 	}
 
 	@Override
@@ -162,8 +164,7 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 
 				if(!pdu.parse(new NetworkInputByteBuffer(data))){
 					System.err.println("Packet from " + Utility.toDpidHexString(dstDpid) + " - " + dstPort + " is not LLDP.");
-				}
-				else{
+				} else {
 					LldpPDU lldp = (LldpPDU)pdu.next;
 					this.checkLldpPacketFormat(lldp);
 
@@ -203,8 +204,7 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 			else{
 				System.out.println("LLDP packet is detected, but OFC does not work LLDP mode.");
 			}
-		}
-		else{
+		} else {
 			System.out.println("\npacketInEvent has invoked from " + Utility.toDpidHexString(packetIn.dpid) + ":" + packetIn.inPort + ".");
 			DpidPortPair host = topologyManager.findDpidPortPair(packetIn.dpid, packetIn.inPort);
 			if(host == null){
@@ -226,7 +226,13 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 			if(!srcSw.contains(srcMac))
 				srcSw.addMac(srcMac, host);
 			
+			
 			DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
+			//PC_Chen
+			if(!macDpidPortMap.containsKey(srcMac.toString())){
+				macDpidPortMap.put(srcMac.toString(), p);
+			}
+
 			for(LogicalSwitch sw : topologyManager.getSwitchList()){
 				if(sw.contains(p)){
 					sw.packetIn(nosApi, packetIn);

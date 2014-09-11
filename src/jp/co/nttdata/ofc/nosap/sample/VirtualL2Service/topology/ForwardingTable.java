@@ -267,7 +267,7 @@ public class ForwardingTable {
 		return ret;
 	}
 
-	class ForwardingTableEntry {
+	public class ForwardingTableEntry {
 		private long[] key;
 		private LinkedList<Integer> portList;
 		private long cost;

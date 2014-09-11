@@ -11,7 +11,7 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.IOperator;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.Operator;
 
-import com.nsfocus.securitycontrolleragent.restlet.RestApiServer;
+import com.nsfocus.scagent.restlet.RestApiServer;
 
 public class VirtualL2ServiceApplicationManager implements INOSApplicationManager{
 	private TopologyManager topologyManager;

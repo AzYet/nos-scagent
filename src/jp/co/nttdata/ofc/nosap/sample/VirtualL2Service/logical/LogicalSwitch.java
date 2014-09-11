@@ -1,6 +1,7 @@
 package jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.logical;
 
 import java.nio.ByteBuffer;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.LinkedList;
@@ -36,7 +37,7 @@ public class LogicalSwitch {
 	public static final int DEFAULT_IDLE_TIMEOUT = 60 * 60;	// sec
 
 	private String name;
-	private int dpid;//added by liuwenmao
+	private long dpid;//added by liuwenmao
 	private CopyOnWriteArrayList<DpidPortPair> dppl;
 	private Hashtable<MacAddress, DpidPortPair> macTable;
 
@@ -51,7 +52,7 @@ public class LogicalSwitch {
 
 	public LogicalSwitch(String name){
 		//TODO
-		this.dpid = Integer.parseInt(name);
+		this.dpid = Long.parseLong(name);
 		this.name = name;
 		this.dppl = new CopyOnWriteArrayList<DpidPortPair>();
 		this.macTable = new Hashtable<MacAddress, DpidPortPair>();
@@ -177,7 +178,16 @@ public class LogicalSwitch {
 
 		DpidPortPair p1 = this.getHost(srcMac);
 		DpidPortPair p2 = this.getHost(dstMac);
-
+		
+		//add by PC_Chen
+		//to prevent broadcast storm 
+		
+		if(isMultiCastAddr(dstMac) && antiStorm(packetIn)){
+			System.out.println("droped a multicast pkt: srcMac="+ packetIn.flow.srcMacaddr + 
+					" dstMac=" + packetIn.flow.dstMacaddr);
+			return;
+		}
+		
 		if((p1 != null) && ((p1.getDpid() != packetIn.dpid) || (p1.getPort() != inPort))){
 			this.removeMac(srcMac);
 
@@ -263,7 +273,77 @@ public class LogicalSwitch {
 			}
 		}
 	}
+	
+	private boolean isMultiCastAddr(MacAddress dstMac) {
+		if((dstMac.toLong()&0x100000000L) == 0){
+			return false;
+		}
+		return true;
+	}
 
+	public static final int BCAST_INTERVAL = 1000;
+	//dpidPktPortTimeMap 
+	Map<Long, HashMap<String, Long[]>> dpidPktPortTimeMap = new HashMap<Long,HashMap<String,Long[]>>();
+
+	private boolean antiStorm(PacketInEventVO packetIn) {
+		String hash = getMD5(packetIn.data);
+		long currentTimeMillis = System.currentTimeMillis();
+		if(dpidPktPortTimeMap.containsKey(packetIn.dpid)){
+			HashMap<String, Long[]> hashPortTimeMap = dpidPktPortTimeMap.get(packetIn.dpid);
+			if(hashPortTimeMap.containsKey(hash)){ // second time the packet enters this dpid
+				Long[] longs = hashPortTimeMap.get(hash);
+				if(currentTimeMillis - longs[1] > BCAST_INTERVAL){ // exceed the threshold
+					longs[0] = (long) packetIn.inPort;
+					longs[1]= currentTimeMillis;
+					return false;
+				}else if(packetIn.inPort == longs[0]){ // lighter than threshold, via the same port 
+					longs[1]= currentTimeMillis;
+					return false;
+				}else{ // lighter than threshold,  via different port 
+					//ignore this packet, no updating the time and Port
+					return true;
+				}
+			}else{ // packet reaches dpid the first time
+				hashPortTimeMap.put(hash, new Long[] {(long)packetIn.inPort,currentTimeMillis});
+				return false;
+			}
+		}else { //dpid receives first bcast packet 
+			HashMap<String, Long[]> tempMap = new HashMap<String , Long[]>();
+			tempMap.put(hash, new Long[] {(long)packetIn.inPort,currentTimeMillis});
+			dpidPktPortTimeMap.put(packetIn.dpid, tempMap);
+			return false;
+		}
+	}
+
+	public static String getMD5(byte[] source) {  
+        String s = null;  
+        char hexDigits[] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',  
+                'a', 'b', 'c', 'd', 'e', 'f' };//
+        try {  
+            java.security.MessageDigest md = java.security.MessageDigest  
+                    .getInstance("MD5");  
+            md.update(source);  
+            byte tmp[] = md.digest();//
+            //
+            char str[] = new char[16 * 2];//
+            //
+            int k = 0;//
+            for (int i = 0; i < 16; i++) {//
+                byte byte0 = tmp[i];//
+                str[k++] = hexDigits[byte0 >>> 4 & 0xf];//
+                //
+                str[k++] = hexDigits[byte0 & 0xf];//
+  
+            }  
+            s = new String(str);//
+  
+        } catch (NoSuchAlgorithmException e) {  
+            // TODO Auto-generated catch block  
+            e.printStackTrace();  
+        }  
+        return s;  
+    }  
+	
 	public String show(){
 		String ret = "";
 		int i = 0;
@@ -341,9 +421,11 @@ public class LogicalSwitch {
 
 	// 同一SWに属する受信ポート以外の全てのポートに転送する
 	private long packetOutToAll(INOSApi nosApi, PacketInEventVO packetIn, int inPort){
-
+		
 		long ret = 0L;
-
+//		if(antiStorm(packetIn)){
+//			return ret;
+//		}
 		IPacketOut iOut;
 		//for(DpidPortPair p : this.dppl){
 		for(Entry<Integer, PhysicalPortVO> entry: this.physicalPorts.entrySet()){

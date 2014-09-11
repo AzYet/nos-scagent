@@ -1,4 +1,4 @@
-package com.nsfocus.securitycontrolleragent.restlet;
+package com.nsfocus.scagent.restlet;
 
 import org.restlet.Application;
 import org.restlet.Restlet;
@@ -10,7 +10,7 @@ public class RestApiApplication extends Application{
     @Override
     public Restlet createInboundRoot() {
         Router router = new Router(this.getContext());
-        router.attach("/hello", RestApiServer.class);
+        router.attach("/scagent/{type}", RestApiServer.class);
         
         return router;    
     }
