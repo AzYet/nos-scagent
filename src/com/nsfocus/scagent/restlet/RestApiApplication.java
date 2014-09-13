@@ -10,7 +10,7 @@ public class RestApiApplication extends Application{
     @Override
     public Restlet createInboundRoot() {
         Router router = new Router(this.getContext());
-        router.attach("/scagent/{type}", RestApiServer.class);
+        router.attach("/scagent/{op}", RestApiServer.class);
         
         return router;    
     }

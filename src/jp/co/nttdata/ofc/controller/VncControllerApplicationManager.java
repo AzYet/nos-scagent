@@ -6,7 +6,6 @@ import java.rmi.server.UnicastRemoteObject;
 
 import jp.co.nttdata.ofc.nos.api.INOSApplication;
 import jp.co.nttdata.ofc.nos.api.INOSApplicationManager;
-import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.VirtualL2ServiceApplication;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.ThreadGenerator;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.IOperator;
@@ -99,6 +98,6 @@ public class VncControllerApplicationManager implements INOSApplicationManager
 	public INOSApplication newInstance()
 	{
 		System.out.println("New instance.");
-		return new VirtualL2ServiceApplication();
+		return new VncControllerApplication();
 	}
 }

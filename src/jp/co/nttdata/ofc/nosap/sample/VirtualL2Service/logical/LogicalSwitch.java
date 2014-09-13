@@ -28,6 +28,9 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.path.Path;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.path.PathManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class LogicalSwitch {
 	public static final long	NONE_BUFFER_ID = 0x00000000FFFFFFFFL;
 	public static final int	NONE_PORT = 0xFFFF;
@@ -45,7 +48,9 @@ public class LogicalSwitch {
 	private TopologyManager topologyManager;
 	
 	private Map<Integer, PhysicalPortVO> physicalPorts;
-
+	
+	private static Logger logger = LoggerFactory.getLogger(LogicalSwitch.class);
+	
 	public Map<Integer, PhysicalPortVO> getPhysicalPorts() {
 		return physicalPorts;
 	}
@@ -174,7 +179,7 @@ public class LogicalSwitch {
 		MacAddress srcMac = packetIn.flow.srcMacaddr;
 		MacAddress dstMac = packetIn.flow.dstMacaddr;
 
-		System.out.println("srcMac:" + srcMac.toString() + ", dstMac:" + dstMac.toString());
+		logger.info("srcMac:" + srcMac.toString() + ", dstMac:" + dstMac.toString()+" etherType: "+packetIn.flow.etherType);
 
 		DpidPortPair p1 = this.getHost(srcMac);
 		DpidPortPair p2 = this.getHost(dstMac);
@@ -183,7 +188,7 @@ public class LogicalSwitch {
 		//to prevent broadcast storm 
 		
 		if(isMultiCastAddr(dstMac) && antiStorm(packetIn)){
-			System.out.println("droped a multicast pkt: srcMac="+ packetIn.flow.srcMacaddr + 
+			logger.info("droped a multicast pkt: srcMac="+ packetIn.flow.srcMacaddr + 
 					" dstMac=" + packetIn.flow.dstMacaddr);
 			return;
 		}
@@ -445,7 +450,7 @@ public class LogicalSwitch {
 
 				ret += iOut.send();
 				//System.out.println("Output to " + Utility.toDpidHexString(p.getDpid()) + ":" + p.getPort() + ".");
-				System.out.println("Output to " + Utility.toDpidHexString(this.dpid) + ":" + port + ".");
+//				System.out.println("Output to " + Utility.toDpidHexString(this.dpid) + ":" + port + ".");
 
 			} catch (OFSwitchNotFoundException e) {
 				// TODO Auto-generated catch block
@@ -477,7 +482,7 @@ public class LogicalSwitch {
 			iPacketOut.setBufferId(LogicalSwitch.NONE_BUFFER_ID);
 			iPacketOut.setInPort(LogicalSwitch.NONE_PORT);
 			iPacketOut.addOutputAction(OFPort.DEPEND_ON_TABLE);
-			System.out.println("PacketOut to TABLE.(" + Utility.toDpidHexString(packetIn.dpid) + ")");
+//			System.out.println("PacketOut to TABLE.(" + Utility.toDpidHexString(packetIn.dpid) + ")");
 			ret = iPacketOut.send();
 		} catch (OFSwitchNotFoundException e) {
 			// TODO 自動生成された catch ブロック

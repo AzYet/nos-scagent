@@ -2,7 +2,9 @@ package com.nsfocus.scagent.restlet;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
@@ -21,15 +23,34 @@ import org.restlet.representation.StringRepresentation;
 import org.restlet.resource.Get;
 import org.restlet.resource.Post;
 import org.restlet.resource.ServerResource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.nsfocus.scagent.command.PolicyActionType;
+import com.nsfocus.scagent.command.PolicyCommand;
+import com.nsfocus.scagent.command.PolicyCommandDeployed;
+import com.nsfocus.scagent.command.SwitchFlowModCount;
 import com.nsfocus.scagent.device.DeviceManager;
 
 public class RestApiServer extends ServerResource {
+	
+    protected static Logger logger = LoggerFactory
+    .getLogger(RestApiServer.class);
+    private static final int DEFAULT_IDLE_TIMEOUT = 5000;
+    private static final int DEFAULT_HARD_TIMEOUT = 0;
+
+    // 将所有策略保存在内存中
+    public static Map<String, PolicyCommandDeployed> policyCommandsDeployed = new HashMap<String, PolicyCommandDeployed>();
+    static Map<String, PolicyCommand> sourcePolicyCommandsWithoutInPort = new HashMap<String, PolicyCommand>();
+    // <DPID,SwitchFlowModCount>
+    static Map<Long, Map<String, SwitchFlowModCount>> switchFlowModCountMap = new HashMap<Long, Map<String, SwitchFlowModCount>>();
+    // <FlowModId,SwitchFlowModCount>
+    static Map<String, SwitchFlowModCount> globalFlowModCountMap = new HashMap<String, SwitchFlowModCount>();
 	public static void runServer() throws Exception {
 
 		// new Server(Context.getCurrent(), Protocol.HTTP,
@@ -38,6 +59,7 @@ public class RestApiServer extends ServerResource {
 		component.getServers().add(Protocol.HTTP, 8182);
 		component.getDefaultHost().attach(new RestApiApplication());
 		component.start();
+		logger.debug("test_______________________________");
 	}
 
 	@Get("json")
@@ -138,7 +160,8 @@ public class RestApiServer extends ServerResource {
 				}
 
 			}else if(type.equalsIgnoreCase("test")) {
-				return new Gson().toJson(TopologyManager.getInstance().getTrunkList());
+				return new Gson().toJson(TopologyManager.getInstance().getForwardingTable().getTable());
+//				return new Gson().toJson(TopologyManager.getInstance().getTrunkList());
 			}
 		}
 		return "{\"result\":\"error\"}";
@@ -151,29 +174,50 @@ public class RestApiServer extends ServerResource {
 
 	@Post
 	public Representation acceptItem(Representation entity) {
+		String op = (String) getRequestAttributes().get("op");
+
 		Representation result = null;
 		// Parse the given representation and retrieve data
-		try {
-			String text = entity.getText();
-			Gson gson = new Gson();
-			JsonParser parser = new JsonParser();
-			JsonObject jsonObject = parser.parse(text).getAsJsonObject();
-			String id = jsonObject.get("id").getAsString();
-			System.out.println("id: " + id);
-			JsonArray ifs = jsonObject.get("ifs").getAsJsonArray();
-			for (int i = 0; i < ifs.size(); i++) {
-				JsonObject ifObj = gson.fromJson(ifs.get(i), JsonObject.class);
-				JsonElement jsonElement = ifObj.get("abc");
-				String connectTo = ifObj.get("connect_to").getAsString();
-				String mac = ifObj.get("mac").getAsString();
-				System.out
-						.println("connect_to:" + connectTo + "\t mac: " + mac);
+		if(op.equalsIgnoreCase("test")){
+			try {
+				String text = entity.getText();
+				Gson gson = new Gson();
+				JsonParser parser = new JsonParser();
+				JsonObject rootNode = parser.parse(text).getAsJsonObject();
+				String id = rootNode.get("id").getAsString();
+				System.out.println("id: " + id);
+				JsonArray ifs = rootNode.get("ifs").getAsJsonArray();
+				for (int i = 0; i < ifs.size(); i++) {
+					JsonObject ifObj = gson.fromJson(ifs.get(i), JsonObject.class);
+					JsonElement jsonElement = ifObj.get("abc");
+					String connectTo = ifObj.get("connect_to").getAsString();
+					String mac = ifObj.get("mac").getAsString();
+					System.out
+					.println("connect_to:" + connectTo + "\t mac: " + mac);
+				}
+				result = new StringRepresentation(text, MediaType.APPLICATION_JSON);
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				result = null;
+				e.printStackTrace();
 			}
-			result = new StringRepresentation(text, MediaType.APPLICATION_JSON);
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			result = null;
-			e.printStackTrace();
+		}else if (op.equalsIgnoreCase("policyaction")){
+			String text;
+			try {
+				text = entity.getText(); // throw exception
+				Gson gson = new Gson();
+				JsonParser parser = new JsonParser();
+				JsonObject rootNode = parser.parse(text).getAsJsonObject();
+				String type = rootNode.get("type").getAsString();
+		        List<? extends PolicyCommand> policyCommands = PolicyCommand.fromJson(
+		                rootNode, PolicyActionType.valueOf(type));
+				if(type.equalsIgnoreCase("REDIRECT_FLOW")){
+		            logger.info("Start to handle " + type + " policyCommands");
+				}
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
 
 		return result;

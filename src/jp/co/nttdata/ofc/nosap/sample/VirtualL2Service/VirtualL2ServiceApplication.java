@@ -1,8 +1,10 @@
 package jp.co.nttdata.ofc.nosap.sample.VirtualL2Service;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.Map.Entry;
 
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
 import jp.co.nttdata.ofc.common.util.MacAddress;
@@ -260,6 +262,21 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 	public void portStatusChangeEvent(INOSApi nosApi,
 			PortStatusEventVO portStatus) {
 		// TODO 自動生成されたメソッド・スタブ
+		System.out.println("port status changing");
+		if(portStatus.reason ==2 && portStatus.physiPort.portStatus == 1){
+			long dpid =portStatus.dpid;
+			int portNo = portStatus.physiPort.portNo;
+			Map<String, DpidPortPair> map = DeviceManager.getInstance().getMacDpidPortMap();
+			ArrayList<String> toRem = new ArrayList<String>();
+			for(Entry<String, DpidPortPair> entry : map.entrySet()){
+				if(entry.getValue().getDpid() == dpid && entry.getValue().getPort() == portNo){
+					toRem.add(entry.getKey());
+				}
+			}
+			for(String toRemItem : toRem){
+				map.remove(toRemItem);
+			}
+		}
 
 	}
 
