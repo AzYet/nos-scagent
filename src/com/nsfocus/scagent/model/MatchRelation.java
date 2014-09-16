@@ -1,4 +1,4 @@
-package com.nsfocus.scagent.command;
+package com.nsfocus.scagent.model;
 
 public enum MatchRelation{
 	EQUAL,SUBSET,SUPERSET,INTERSECT,UNRELATED,UNKNOWN

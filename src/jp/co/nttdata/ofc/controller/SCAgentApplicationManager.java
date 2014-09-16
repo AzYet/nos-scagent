@@ -14,13 +14,13 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.webservice.Operator;
 import com.nsfocus.scagent.restlet.RestApiServer;
 
 
-public class VncControllerApplicationManager implements INOSApplicationManager
+public class SCAgentApplicationManager implements INOSApplicationManager
 {
 
 
 	private TopologyManager topologyManager;
 
-	public VncControllerApplicationManager(){
+	public SCAgentApplicationManager(){
 		topologyManager = TopologyManager.getInstance();
 		TopologyManager.USE_LLDP = true;
 	}
@@ -98,6 +98,6 @@ public class VncControllerApplicationManager implements INOSApplicationManager
 	public INOSApplication newInstance()
 	{
 		System.out.println("New instance.");
-		return new VncControllerApplication();
+		return new SCAgentApplication();
 	}
 }

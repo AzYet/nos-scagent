@@ -1,4 +1,4 @@
-package com.nsfocus.scagent.command;
+package com.nsfocus.scagent.model;
 
 
 import java.util.Arrays;
@@ -51,73 +51,7 @@ public class MatchArguments {
         this.transportSource = 0;
     }
 
-    /**
-     * 
-     * @return an OFMatch object without in_port
-     */
-    public Flow toOFMatch() {
-        Integer wildcard_hints = OFWildCard.ALL;
-        Flow flow = new Flow();
-        if (!Arrays.equals(dataLayerSource, new byte[] { 0, 0, 0, 0, 0, 0 })) {
-            wildcard_hints &= ~OFWildCard.SRC_MACADDR;
-            try {
-				flow.srcMacaddr = new MacAddress(dataLayerSource);
-			} catch (NosException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-        }
-        if (!Arrays.equals(dataLayerDestination,
-                new byte[] { 0, 0, 0, 0, 0, 0 })) {
-            wildcard_hints &= ~OFWildCard.DST_MACADDR;
-            try {
-				flow.dstMacaddr = new MacAddress(dataLayerDestination);
-			} catch (NosException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-        }
-        if (dataLayerVirtualLan != VLAN_UNTAGGED) {
-//            wildcard_hints &= ~OFMatch.OFPFW_DL_VLAN;
-        	wildcard_hints &= ~OFWildCard.VLAN_ID;
-            flow.vlanId = (dataLayerVirtualLan);
-            if (dataLayerVirtualLanPriorityCodePoint != 0) {
-                flow.vlanPriority = (dataLayerVirtualLanPriorityCodePoint);
-            }
-        }
-        if (dataLayerType != 0) {
-//            wildcard_hints &= ~OFMatch.OFPFW_DL_TYPE;
-            wildcard_hints &= ~OFWildCard.ETHER_TYPE;//Match.OFPFW_DL_TYPE;
-            flow.etherType = (dataLayerType);
-        }
-//        if (networkSource != 0) {
-//            wildcard_hints &= ~OFWildCard.OFMatch.OFPFW_NW_DST_MASK;
-//            flow.setNetworkSource(networkSource);
-//        }
-//        if (networkDestination != 0) {
-//            wildcard_hints &= ~OFMatch.OFPFW_NW_SRC_MASK;
-//            flow.setNetworkDestination(networkDestination);
-//        }
-        if (networkProtocol != 0) {
-            wildcard_hints &= ~OFWildCard.NW_PROTO;//Match.OFPFW_NW_PROTO;
-            flow.proto=(networkProtocol);
-        }
-        if (networkTypeOfService != 0) {
-            wildcard_hints &= ~OFWildCard.TOS;//Match.OFPFW_NW_TOS;
-            flow.tos = (networkTypeOfService);
-        }
-        if (transportSource != 0) {
-            wildcard_hints &= ~OFWildCard.SRC_PORT;//Match.OFPFW_TP_SRC;
-            flow.srcPort = (transportSource);
-        }
-        if (transportDestination != 0) {
-            wildcard_hints &= ~OFWildCard.DST_PORT;//Match.OFPFW_TP_DST;
-            flow.dstPort = (transportDestination);
-        }
-        flow.wildCards = (wildcard_hints);
-        return flow;
 
-    }
 
     /**
      * 比较两个Match的关系

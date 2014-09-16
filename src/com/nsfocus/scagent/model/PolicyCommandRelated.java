@@ -1,4 +1,4 @@
-package com.nsfocus.scagent.command;
+package com.nsfocus.scagent.model;
 
 
 public class PolicyCommandRelated implements Comparable<PolicyCommandRelated>{

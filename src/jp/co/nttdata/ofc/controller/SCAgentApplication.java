@@ -7,6 +7,7 @@ import java.util.LinkedList;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import com.nsfocus.scagent.manager.SCAgentDriver;
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
 import jp.co.nttdata.ofc.common.util.MacAddress;
 import jp.co.nttdata.ofc.common.util.NetworkInputByteBuffer;
@@ -44,13 +45,14 @@ import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 
 import com.nsfocus.scagent.device.DeviceManager;
 
-public class VncControllerApplication implements INOSApplication{
+public class SCAgentApplication implements INOSApplication{
 	private TopologyManager topologyManager;
 	private MacAddress lldpMacAddress;
 	private Operator operator;
 	Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
+    private SCAgentDriver scAgentDriver = SCAgentDriver.getInstance();
 
-	public VncControllerApplication()
+    public SCAgentApplication()
 	{
 		this.topologyManager = TopologyManager.getInstance();
 		this.lldpMacAddress = NosFactory.createMacAddress(LldpPacketGenerator.LLDP_MULTICAST_ADDR);
@@ -147,7 +149,9 @@ public class VncControllerApplication implements INOSApplication{
 
 	@Override
 	public void packetInEvent(INOSApi nosApi, PacketInEventVO packetIn) {	
-		
+
+        scAgentDriver.setNosApi(nosApi);
+
 		TopologyManager topologyManager = TopologyManager.getInstance();
 
 		try{
@@ -158,8 +162,8 @@ public class VncControllerApplication implements INOSApplication{
 		if(packetIn.flow.dstMacaddr.equals(this.lldpMacAddress)){
 			//System.out.println("LLDP packet in..................");
 			if(TopologyManager.USE_LLDP){
-				long dstDpid = packetIn.dpid;
-				int dstPort = packetIn.inPort;
+                long dstDpid = packetIn.dpid;
+                int dstPort = packetIn.inPort;
 
 				byte[] data = packetIn.data;
 
