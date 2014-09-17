@@ -10,7 +10,10 @@ import java.util.concurrent.TimeUnit;
 
 import com.nsfocus.scagent.manager.SCAgentDriver;
 import com.nsfocus.scagent.model.*;
+import com.nsfocus.scagent.utility.Ethernet;
 import com.nsfocus.scagent.utility.HexString;
+import com.nsfocus.scagent.utility.IPv4;
+import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 
@@ -50,7 +53,10 @@ public class RestApiServer extends ServerResource {
     public static Map<Long, Map<String, SwitchFlowModCount>> switchFlowModCountMap = new HashMap<Long, Map<String, SwitchFlowModCount>>();
     // <FlowModId,SwitchFlowModCount>
     public static Map<String, SwitchFlowModCount> globalFlowModCountMap = new HashMap<String, SwitchFlowModCount>();
-	public static void runServer() throws Exception {
+    public static Map<String, BYODRedirectCommand> redirectCommands = new HashMap<String, BYODRedirectCommand>();
+    public static Map<String, PolicyCommand> allowPolicies = new HashMap<String, PolicyCommand>();
+
+    public static void runServer() throws Exception {
 
 		// new Server(Context.getCurrent(), Protocol.HTTP,
 		// 8182,RestApiServer.class).start();
@@ -169,8 +175,7 @@ public class RestApiServer extends ServerResource {
                     String status = "ok";
                     for (PolicyCommand policyCommand : policyCommands) {
                         // add redirect rules to Packet_In handler
-                        BYODRedirectCommand addInitRes = scAgentDriver
-                                .addPacketInRedirect((BYODRedirectCommand) policyCommand);
+                        BYODRedirectCommand addInitRes =addPacketInRedirect((BYODRedirectCommand) policyCommand);
                         if (addInitRes != null) {
                             res += "add policy with the same id "
                                     + policyCommand.getId() + " exists, abort.";
@@ -179,7 +184,7 @@ public class RestApiServer extends ServerResource {
                             continue;
                         }
                         // generate init commands to allow dhcp , arp , dns and redirect
-                        initCommands.addAll(scAgentDriver.generateInitCommands(policyCommand));
+                        initCommands.addAll(generateInitCommands(policyCommand));
                     }
                     // Send initiating flows generated above
                     for (PolicyCommand policyCommand : initCommands) {
@@ -195,6 +200,88 @@ public class RestApiServer extends ServerResource {
                     retMap.put("result", resStr);
                     retMap.put("status", status);
                     return new StringRepresentation(gson.toJson(retMap), MediaType.APPLICATION_JSON);
+                }else if (type.equalsIgnoreCase(PolicyActionType.BYOD_ALLOW.toString())) {
+                    String resStr = "";
+                    String status = "ok";
+                    for (final PolicyCommand policyCommand : policyCommands) {
+                        PolicyCommand addpolicyRes = addToAllowPolicies(policyCommand);
+                        if (addpolicyRes != null) {
+                            res += "add policy with the same id "
+                                    + policyCommand.getId() + " exists, abort.";
+                            resStr += policyCommand.getId() + ": exists";
+                            status = "error";
+                            continue;
+                        }
+                        //delete previous flow if exists
+                        // >>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+//                        OFFlowMod fm = (OFFlowMod) floodlightProvider.getOFMessageFactory()
+//                                .getMessage(OFType.FLOW_MOD);
+//                        IOFSwitch sw = floodlightProvider.getSwitch(policyCommand.getDpid());
+//                        long cookie = AppCookie.makeCookie(FORWARDING_APP_ID, 0);
+//                        OFMatch match;
+//                        match = policyCommand.getMatch().toOFMatch();
+//                        match.setWildcards(match.getWildcards() & ~OFMatch.OFPFW_IN_PORT);
+//                        match.setInputPort(policyCommand.getInPort());
+                        MatchArguments match = policyCommand.getMatch();
+                        match.setWildcards(match.getWildcards() & ~OFPConstant.OFWildCard.IN_PORT);
+                        match.setInputPort(policyCommand.getInPort());
+                        FlowAction action = new FlowAction(OFPConstant.OFPort.CONTROLLER);
+//                        List<OFAction> actions = new ArrayList<OFAction>();
+//                        actions.add(new OFActionOutput(OFPConstant.OFPort.OFPP_CONTROLLER.getValue(),
+//                                (short) 0xFFFF)); // OFPort.OFPP_NONE;
+                        FlowSettings settings = policyCommand.createFlowSettings();
+//                        fm.setIdleTimeout((short) policyCommand.getIdleTimeout())
+//                                .setHardTimeout((short) policyCommand.getHardTimeout())
+//                                .setBufferId(OFPacketOut.BUFFER_ID_NONE)
+//                                .setCommand(OFFlowMod.OFPFC_DELETE_STRICT).setMatch(match)
+//                                .setActions(actions);
+//                        fm.setOutPort(OFPConstant.OFPort.OFPP_CONTROLLER);
+//                        fm.setFlags(OFFlowMod.OFPFF_SEND_FLOW_REM);
+//                        fm.setCookie(cookie);
+//                        fm.setPriority((short) policyCommand.getCommandPriority());
+//                        fm.setLengthU(OFFlowMod.MINIMUM_LENGTH + OFActionOutput.MINIMUM_LENGTH);
+                        if (policyCommand.getDpid() != 0) {
+                            String flowModId = scAgentDriver.sendFlowMod(policyCommand.getDpid(), match, action, settings);
+                            resStr += policyCommand.getId() + ": " + flowModId;
+                            if (flowModId == null) {
+                                status = "error";
+                            }
+                        } else {
+                            status = "error";
+                            logger.warn("cannot find sw: {}, abort!", policyCommand.getDpid());
+                        }
+                        if (policyCommand.getHardTimeout() != 0) {
+                            final PolicyCommand restorePolicy = new PolicyCommand(
+                                    policyCommand.getId(),
+                                    PolicyActionType.RESTORE_BYOD_ALLOW,
+                                    policyCommand.getHardTimeout());
+                            ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
+
+                            final List<PolicyCommand> restoreCommands = new ArrayList<PolicyCommand>() {
+                                private static final long serialVersionUID = 1L;
+
+                                {
+                                    add(restorePolicy);
+                                }
+                            };
+                            scheduledExecutor.schedule(new Runnable() {
+
+                                @Override
+                                public void run() {
+                                    scAgentDriver.deletePolicies(restorePolicy.getType(),
+                                            restoreCommands);
+                                    removeFromAllowPolicies(policyCommand
+                                            .getId());
+                                }
+
+                            }, policyCommand.getHardTimeout(), TimeUnit.SECONDS);
+                        }
+                    }
+                    HashMap<String, String> retMap = new HashMap<String, String>();
+                    retMap.put("status", status);
+                    retMap.put("result", resStr);
+                    return new StringRepresentation(gson.toJson(retMap));
                 }
                 result = new StringRepresentation(gson.toJson(policyCommands),MediaType.APPLICATION_JSON);
 			} catch (IOException e) {
@@ -246,14 +333,7 @@ public class RestApiServer extends ServerResource {
                 for (int j = 0; j < path.size() - 1; j += 2) {
                     policyCommand.getMatch().setInputPort((short) path.get(j).getPort());
                     FlowAction action = new FlowAction( path.get(j + 1).getPort());
-                    FlowSettings settings = new FlowSettings();
-                    settings.setIdleTimeout((short) policyCommand.getIdleTimeout())
-                            .setHardTimeout((short) policyCommand.getHardTimeout())
-                            .setCommand(FlowMod.FMCommand.ADD)
-                            .setBufferId(FlowMod.BUFFER_ID_NONE)
-                            .setCookie(SCAgentDriver.cookie)
-                            .setPriority((short) policyCommand.getCommandPriority())
-                            .getFlags().add(FlowMod.FMFlag.SEND_FLOW_REM);
+                    FlowSettings settings = policyCommand.createFlowSettings();
                     FlowMod flowMod = new FlowMod(policyCommand.getMatch(), action, settings);
                     String flowModId = scAgentDriver.sendFlowMod(path.get(j).getDpid(), flowMod);
                     if (flowModId != null) {
@@ -588,4 +668,94 @@ public class RestApiServer extends ServerResource {
             }
         }
     }
+
+    public BYODRedirectCommand addPacketInRedirect(BYODRedirectCommand policyCommand) {
+        if (redirectCommands.containsKey(policyCommand.getId())) {
+            return redirectCommands.get(policyCommand.getId());
+        }
+        return this.redirectCommands.put(policyCommand.getId(),
+                policyCommand);
+    }
+
+    public List<PolicyCommand> generateInitCommands(PolicyCommand policyCommand) {
+        ArrayList<PolicyCommand> initCommands = new ArrayList<PolicyCommand>();
+        // priority=0 , inport , controller
+        if (getRedirectCommands().size() == 1) {
+            PolicyCommand controllerAllCommand = new PolicyCommand("ByodInit_0_"
+                    + policyCommand.getId(), "controllerAllCommand", 0,
+                    PolicyActionType.ALLOW_FLOW, new MatchArguments(), null, 0, 0,
+                    policyCommand.getDpid(), policyCommand.getInPort());
+            initCommands.add(controllerAllCommand);
+        }
+        // priority=1 , inport , drop
+        MatchArguments inPortMatch = new MatchArguments();
+        inPortMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand dropAllCommand = new PolicyCommand("ByodInit_1_"
+                + policyCommand.getId(), "dropAllCommand", 1,
+                PolicyActionType.DROP_FLOW, inPortMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(dropAllCommand);
+        // allow arp, priorty = 2
+        MatchArguments allowArpMatch = new MatchArguments();
+        allowArpMatch.setDataLayerType(Ethernet.TYPE_ARP);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand allowArpCommand = new PolicyCommand("ByodInit_2_"
+                + policyCommand.getId(), "AllowArp", 2,
+                PolicyActionType.ALLOW_FLOW, allowArpMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(allowArpCommand);
+        // allow dhcp, priorty = 2
+        MatchArguments allowDhcpMatch = new MatchArguments();
+        allowDhcpMatch.setDataLayerType(Ethernet.TYPE_IPv4);
+        allowDhcpMatch.setNetworkProtocol(IPv4.PROTOCOL_UDP);
+        allowDhcpMatch.setTransportDestination((short) 67);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand allowDhcpCommand = new PolicyCommand("ByodInit_3_"
+                + policyCommand.getId(), "AllowDHCP", 2,
+                PolicyActionType.ALLOW_FLOW, allowDhcpMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(allowDhcpCommand);
+
+        // allow dns, priorty = 2
+        MatchArguments allowDnsMatch = new MatchArguments();
+        allowDnsMatch.setDataLayerType(Ethernet.TYPE_IPv4);
+        allowDnsMatch.setNetworkProtocol(IPv4.PROTOCOL_UDP);
+        allowDnsMatch.setTransportDestination((short) 53);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand allowDnsCommand = new PolicyCommand("ByodInit_4_"
+                + policyCommand.getId(), "AllowDns", 2,
+                PolicyActionType.ALLOW_FLOW, allowDnsMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(allowDnsCommand);
+
+        // redirect tcp 80
+        MatchArguments httpMatch = new MatchArguments();
+        httpMatch.setDataLayerType(Ethernet.TYPE_IPv4);
+        httpMatch.setNetworkProtocol(IPv4.PROTOCOL_TCP);
+        httpMatch.setTransportDestination((short) 80);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand redirectHpptCommand = new PolicyCommand("ByodInit_5_"
+                + policyCommand.getId(), "redirectHttp", 2,
+                PolicyActionType.ALLOW_FLOW, httpMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(redirectHpptCommand);
+        return initCommands;
+    }
+
+    public static PolicyCommand addToAllowPolicies(PolicyCommand policyCommand) {
+        if (allowPolicies.containsKey(policyCommand.getId())) {
+            return allowPolicies.get(policyCommand.getId());
+        }
+        return allowPolicies.put(policyCommand.getId(), policyCommand);
+
+    }
+
+    public static PolicyCommand removeFromAllowPolicies(String id) {
+        return allowPolicies.remove(id);
+    }
+
+    public static Map<String, BYODRedirectCommand> getRedirectCommands() {
+        return redirectCommands;
+    }
+
 }

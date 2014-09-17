@@ -1,20 +1,21 @@
 package com.nsfocus.scagent.manager;
 
+import com.nsfocus.scagent.device.DeviceManager;
 import com.nsfocus.scagent.model.*;
 import com.nsfocus.scagent.restlet.RestApiServer;
-import com.nsfocus.scagent.utility.Cypher;
-import com.nsfocus.scagent.utility.Ethernet;
-import com.nsfocus.scagent.utility.IPv4;
-import com.nsfocus.scagent.utility.MACAddress;
+import com.nsfocus.scagent.utility.*;
 import jp.co.nttdata.ofc.common.except.NosException;
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
+import jp.co.nttdata.ofc.common.util.IpAddress;
 import jp.co.nttdata.ofc.common.util.MacAddress;
+import jp.co.nttdata.ofc.common.util.NetworkInputByteBuffer;
 import jp.co.nttdata.ofc.nos.api.IFlowModifier;
 import jp.co.nttdata.ofc.nos.api.INOSApi;
 import jp.co.nttdata.ofc.nos.api.except.ActionNotSupportedException;
 import jp.co.nttdata.ofc.nos.api.except.ArgumentInvalidException;
 import jp.co.nttdata.ofc.nos.api.except.OFSwitchNotFoundException;
 import jp.co.nttdata.ofc.nos.api.except.SwitchPortNotFoundException;
+import jp.co.nttdata.ofc.nos.api.vo.event.PacketInEventVO;
 import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nos.ofp.common.Flow;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
@@ -22,6 +23,11 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Edge;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.ForwardingTable;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Trunk;
+import jp.co.nttdata.ofc.protocol.IProtocol;
+import jp.co.nttdata.ofc.protocol.packet.EthernetPDU;
+import jp.co.nttdata.ofc.protocol.packet.IPv4PDU;
+import jp.co.nttdata.ofc.protocol.packet.TcpPDU;
+import org.restlet.routing.Route;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,7 +44,6 @@ public class SCAgentDriver implements ISCAgentDriver {
     public static final long cookie = 0xabcdefL;
     static Logger logger = LoggerFactory.getLogger(SCAgentDriver.class);
     private static SCAgentDriver scAgentDriver = new SCAgentDriver();
-    public Map<String, BYODRedirectCommand> redirectCommands = new HashMap<String, BYODRedirectCommand>();
 
 
     public static SCAgentDriver getInstance(){
@@ -52,9 +57,6 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     }
 
-    public Map<String, BYODRedirectCommand> getRedirectCommands() {
-        return redirectCommands;
-    }
 
     @Override
     public List<DpidPortPair> computeRoute(DpidPortPair start, DpidPortPair end) {
@@ -364,78 +366,7 @@ public class SCAgentDriver implements ISCAgentDriver {
     }
 
 
-    public BYODRedirectCommand addPacketInRedirect(BYODRedirectCommand policyCommand) {
-        if (redirectCommands.containsKey(policyCommand.getId())) {
-            return redirectCommands.get(policyCommand.getId());
-        }
-        return this.redirectCommands.put(policyCommand.getId(),
-                policyCommand);
-    }
 
-    public List<PolicyCommand> generateInitCommands(PolicyCommand policyCommand) {
-        ArrayList<PolicyCommand> initCommands = new ArrayList<PolicyCommand>();
-        // priority=0 , inport , controller
-        if (getRedirectCommands().size() == 1) {
-            PolicyCommand controllerAllCommand = new PolicyCommand("ByodInit_0_"
-                    + policyCommand.getId(), "controllerAllCommand", 0,
-                    PolicyActionType.ALLOW_FLOW, new MatchArguments(), null, 0, 0,
-                    policyCommand.getDpid(), policyCommand.getInPort());
-            initCommands.add(controllerAllCommand);
-        }
-        // priority=1 , inport , drop
-        MatchArguments inPortMatch = new MatchArguments();
-        inPortMatch.setInputPort(policyCommand.getInPort());
-        PolicyCommand dropAllCommand = new PolicyCommand("ByodInit_1_"
-                + policyCommand.getId(), "dropAllCommand", 1,
-                PolicyActionType.DROP_FLOW, inPortMatch, null, 0, 0,
-                policyCommand.getDpid(), policyCommand.getInPort());
-        initCommands.add(dropAllCommand);
-        // allow arp, priorty = 2
-        MatchArguments allowArpMatch = new MatchArguments();
-        allowArpMatch.setDataLayerType(Ethernet.TYPE_ARP);
-        allowArpMatch.setInputPort(policyCommand.getInPort());
-        PolicyCommand allowArpCommand = new PolicyCommand("ByodInit_2_"
-                + policyCommand.getId(), "AllowArp", 2,
-                PolicyActionType.ALLOW_FLOW, allowArpMatch, null, 0, 0,
-                policyCommand.getDpid(), policyCommand.getInPort());
-        initCommands.add(allowArpCommand);
-        // allow dhcp, priorty = 2
-        MatchArguments allowDhcpMatch = new MatchArguments();
-        allowDhcpMatch.setDataLayerType(Ethernet.TYPE_IPv4);
-        allowDhcpMatch.setNetworkProtocol(IPv4.PROTOCOL_UDP);
-        allowDhcpMatch.setTransportDestination((short) 67);
-        allowArpMatch.setInputPort(policyCommand.getInPort());
-        PolicyCommand allowDhcpCommand = new PolicyCommand("ByodInit_3_"
-                + policyCommand.getId(), "AllowDHCP", 2,
-                PolicyActionType.ALLOW_FLOW, allowDhcpMatch, null, 0, 0,
-                policyCommand.getDpid(), policyCommand.getInPort());
-        initCommands.add(allowDhcpCommand);
-
-        // allow dns, priorty = 2
-        MatchArguments allowDnsMatch = new MatchArguments();
-        allowDnsMatch.setDataLayerType(Ethernet.TYPE_IPv4);
-        allowDnsMatch.setNetworkProtocol(IPv4.PROTOCOL_UDP);
-        allowDnsMatch.setTransportDestination((short) 53);
-        allowArpMatch.setInputPort(policyCommand.getInPort());
-        PolicyCommand allowDnsCommand = new PolicyCommand("ByodInit_4_"
-                + policyCommand.getId(), "AllowDns", 2,
-                PolicyActionType.ALLOW_FLOW, allowDnsMatch, null, 0, 0,
-                policyCommand.getDpid(), policyCommand.getInPort());
-        initCommands.add(allowDnsCommand);
-
-        // redirect tcp 80
-        MatchArguments httpMatch = new MatchArguments();
-        httpMatch.setDataLayerType(Ethernet.TYPE_IPv4);
-        httpMatch.setNetworkProtocol(IPv4.PROTOCOL_TCP);
-        httpMatch.setTransportDestination((short) 80);
-        allowArpMatch.setInputPort(policyCommand.getInPort());
-        PolicyCommand redirectHpptCommand = new PolicyCommand("ByodInit_5_"
-                + policyCommand.getId(), "redirectHttp", 2,
-                PolicyActionType.ALLOW_FLOW, httpMatch, null, 0, 0,
-                policyCommand.getDpid(), policyCommand.getInPort());
-        initCommands.add(redirectHpptCommand);
-        return initCommands;
-    }
 
     public String processSingleFlowCommand(PolicyCommand policyCommand) {
         if (RestApiServer.policyCommandsDeployed.containsKey(policyCommand.getId())) {
@@ -480,6 +411,245 @@ public class SCAgentDriver implements ISCAgentDriver {
         }
         String ret = sendFlowMod(tgtSw, policyCommand.getMatch(), action, settings);
         return ret;
+
+    }
+
+    public String deletePolicies(PolicyActionType type, List<PolicyCommand> policyCommands) {
+        logger.info("Start to handle " + type + " policyCommands");
+        for (PolicyCommand policyCommand : policyCommands) {
+            List<String> flowModIdList = RestApiServer.policyCommandsDeployed.get(
+                    policyCommand.getId()).getFlowModIdList();
+            for (String fmid : flowModIdList) {
+                SwitchFlowModCount switchFlowModCount = RestApiServer.globalFlowModCountMap
+                        .get(fmid);
+                if (switchFlowModCount != null) {
+                    int remainCount = switchFlowModCount.decreaseCount();
+                    if (remainCount == 0) {
+                        scAgentDriver.removeFlowEntry(fmid);
+                    }
+                }
+            }
+            RestApiServer.policyCommandsDeployed.remove(policyCommand.getId());
+            // still need to remove entry from RestApiServer.allowPolicies
+            if (type == PolicyActionType.RESTORE_BYOD_ALLOW) {
+                RestApiServer.removeFromAllowPolicies(policyCommand.getId());
+            }
+        }
+        return type.toString();
+
+    }
+
+    private String removeFlowEntry(String fmid) {
+        //TODO:
+        return null;
+    }
+
+    /***
+     * 
+     * @param nosApi
+     * @param packetIn
+     * @return true to continue , false to break;
+     */
+    public boolean handleIncomingPackets(INOSApi nosApi, PacketInEventVO packetIn) throws NosException {
+        if (this.nosApi == null) {
+            this.nosApi = nosApi;
+        }
+        if (RestApiServer.redirectCommands.isEmpty()) {
+            return true;
+        }
+        EthernetPDU eth = new EthernetPDU();
+        if (!eth.parse(new NetworkInputByteBuffer(packetIn.data))) {
+            logger.warn("failed to parse data as an ethernet frame");
+            return false;
+        }
+//        Ethernet eth = IFloodlightProviderService.bcStore.get(cntx,
+//                IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
+
+        // Ethernet ethToSend = null;
+//        eth.getDestinationMAC().toString()
+        Boolean res = true;
+        for (Map.Entry<String, BYODRedirectCommand> rulesEntry : RestApiServer.redirectCommands
+                .entrySet()) {
+            BYODRedirectCommand byodCommand = rulesEntry.getValue();
+            // check if the dpid matches
+            if (byodCommand.getDpid() != 0
+                    && byodCommand.getDpid() != packetIn.dpid) {
+                res = true;
+                continue;
+            }
+            // check if the inport matches
+            if (byodCommand.getInPort() != 0
+                    && byodCommand.getInPort() != packetIn.inPort) {
+                res = true;
+                continue;
+            }
+            MacAddress piDlSrc = eth.srcMacaddr;
+            // pass all type of pi from authorized devices
+            for (PolicyCommand p : RestApiServer.allowPolicies.values()) {
+                if (piDlSrc != null
+                        && MACAddress.valueOf(p.getMatch().getDataLayerSource())
+                        .equals(MACAddress.valueOf(piDlSrc.toLong()))
+                        ) {
+                    return true;
+                }
+            }
+            // packets of unauthorized devices from specified dpid and inPort
+            if (eth.etherType == Ethernet.TYPE_IPv4) {
+                IPv4PDU ip =(IPv4PDU) eth.next;
+//                IPv4 ip = (IPv4) eth.getPayload();
+                IpAddress piNwSrc = ip.srcIpaddr;
+                // check if the source ip belongs to the specified subnet
+                if ((piNwSrc.toLong() & (0xFFFFFFFF << (32 - byodCommand
+                        .getMask()))) != (IPv4.toIPv4Address(byodCommand
+                        .getNetwork()) & (0xFFFFFFFF << (32 - byodCommand
+                        .getMask())))) {
+                    logger.info("network not match {}", piNwSrc);
+                    //won't match another init policy , suppose that a switch port connects to single ap
+                    // so just return
+                    return true;
+                }
+                if (ip.proto == IPv4.PROTOCOL_TCP) { // case tcp
+                    TcpPDU tcpFrame = (TcpPDU) ip.next;
+//                    TCP tcpFrame = (TCP) ip.getPayload();
+                    int piTpDst = (int) (tcpFrame.dstPort >= 0 ? tcpFrame
+                            .dstPort : tcpFrame
+                            .dstPort + 65536);
+                    if (piTpDst == 80) {
+                        logger.info("captured a matching packet , launching redirect operation");
+
+//                        OFMatch match = new OFMatch();
+                        Flow match = new Flow();
+                        long origNwDst = 0;
+                        MacAddress origDlDst = null;
+                        origNwDst = ip.dstIpaddr.toLong();
+                        origDlDst = eth.dstMacaddr;
+                        logger.info(
+                                "orgin ip and mac = {} and {},now the dpid is {}",
+                                new Object[]{IPv4.fromIPv4Address((int) origNwDst),
+                                        origDlDst,
+                                        HexString.toHexString(packetIn.dpid, 8)});
+                        match.extractFlowInfo(eth,packetIn.inPort);
+//                        match.loadFromPacket(pi.getPacketData(), pi.getInPort());
+                        match.wildCards |= OFPConstant.OFWildCard.DST_MACADDR;
+
+                        DpidPortPair dpidPortPair = DeviceManager.getInstance().findHostByMac(byodCommand
+                                .getServerMac());
+                        DpidPortPair svrAp = null;
+                        if (dpidPortPair != null) {
+                            svrAp = dpidPortPair;
+                        } else {
+                            logger.warn("cannot find the ap of {}, abort!",
+                                    byodCommand.getServerMac());
+                            return false;
+                        }
+                        DpidPortPair devAp = new DpidPortPair(
+                                byodCommand.getDpid(), byodCommand.getInPort());
+
+                        // compute a route form device to authenication server
+//                        Route route = computeRoute(devAp, svrAp);
+                        List<DpidPortPair> path = computeRoute(devAp, svrAp);
+                        if (path == null || path.size()<1) {
+                            logger.warn(
+                                    "routeEngine cannot find a path from {} to {}",
+                                    devAp.toString(), svrAp.toString());
+                            return false;
+                        }
+                        // push flows into every switch in the route
+                        for (int j = 0; path != null && j < path.size() - 1; j += 2) {
+                            if (j + 2 < path.size()) {
+                                // do nothing more than output
+                                IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
+                                flowModifier.addOutputAction(path.get(j+1).getPort(),0);
+                                FlowSettings settings = byodCommand.createFlowSettings();
+                                flowModifier.setFlags(toU16Flag(settings.getFlags()));
+                                flowModifier.setHardTimeoutSec(settings.getHardTimeout());
+                                flowModifier.setIdleTimeoutSec(settings.getIdleTimeout());
+                                flowModifier.setCookie(cookie);
+                                flowModifier.setAddCommand();
+                                flowModifier.setPriority(settings.getPriority());
+                                flowModifier.setBufferId(settings.getBufferId());
+                                flowModifier.send();
+//                                pushFlowEntry(byodCommand, match, path.get(j),
+//                                        path.get(j + 1), "none", 0, null, null);
+                            } else {
+                                IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
+                                flowModifier.addOutputAction(path.get(j+1).getPort(),0);
+                                flowModifier.addSetDstIpaddrAction(IPv4.toIPv4Address(byodCommand.getServerIp()));
+                                flowModifier.addSetDstMacaddrAction(MACAddress.valueOf(byodCommand.getServerMac()).toLong());
+                                FlowSettings settings = byodCommand.createFlowSettings();
+                                flowModifier.setFlags(toU16Flag(settings.getFlags()));
+                                flowModifier.setHardTimeoutSec(settings.getHardTimeout());
+                                flowModifier.setIdleTimeoutSec(settings.getIdleTimeout());
+                                flowModifier.setCookie(cookie);
+                                flowModifier.setAddCommand();
+                                flowModifier.setPriority(settings.getPriority());
+                                flowModifier.setBufferId(settings.getBufferId());
+                                flowModifier.send();
+//                                pushFlowEntry(
+//                                        byodCommand,
+//                                        match,
+//                                        path.get(j),
+//                                        path.get(j + 1),
+//                                        "dst",
+//                                        IPv4.toIPv4Address(byodCommand
+//                                                .getServerIp()),
+//                                        MACAddress.valueOf(
+//                                                byodCommand.getServerMac())
+//                                                .toBytes(), null);
+                            }
+                        }
+                        // now need to add a route back from server to device ,
+                        // just reverse the previous route will do
+                        // and reverse the match too, replace origin destination
+                        // server to authentications server info
+                        logger.info("now creating a route for flow to back to device...");
+                        Flow match1 = match.clone();
+//                        match1.setWildcards(match.getWildcards()
+//                                | OFMatch.OFPFW_DL_DST);
+                        match1.wildCards |= OFPConstant.OFWildCard.DST_MACADDR;
+                        // match1.setDataLayerDestination(match.getDataLayerSource());
+                        match1.dstMacaddr = match
+                                .srcMacaddr;
+                        match1.srcMacaddr = new MacAddress(byodCommand.getServerMac());
+                        match1.dstIpaddr = match.srcIpaddr;
+                        match1.srcIpaddr = new IpAddress(byodCommand.getServerIp());
+                        match1.dstPort = match
+                                .srcPort;
+                        match1.srcPort = match
+                                .dstPort;
+                        Flow match2 = match1.clone();
+                        match2.srcMacaddr=new MacAddress(origDlDst);
+                        match2.srcIpaddr= new IpAddress(origNwDst);
+
+                        for (int j = path.size() - 1; j >= 0; j -= 2) {
+                            if (j != path.size() - 1) {
+                                // do nothing more than output
+                                IFlowModifier modifier1 = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match2);
+                                
+                                pushFlowEntry(byodCommand, match2, path.get(j),
+                                        path.get(j - 1), "none", 0, null, null);
+                            } else {
+                                pushFlowEntry(byodCommand, match1, path.get(j),
+                                        path.get(j - 1), "src", origNwDst,
+                                        origDlDst, eth.getSourceMACAddress());
+                            }
+                        }
+                        return false;
+                    } else if (piTpDst == 53 || piTpDst == 67) {
+                        return true;
+                    } else {
+                        return false;
+                    }
+                } else { // none tcp (udp) packet, may be dns and dhcp , should
+                    // let it pass
+                    return true;
+                }
+            } else { // none ipv4 packet , may be arp , let it pass
+                return true;
+            }
+        }
+        return res;
+
 
     }
 }

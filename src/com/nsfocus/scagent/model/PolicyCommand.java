@@ -8,6 +8,7 @@ import java.util.List;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.nsfocus.scagent.manager.SCAgentDriver;
 import com.nsfocus.scagent.restlet.RestApiServer;
 
 
@@ -204,6 +205,18 @@ public class PolicyCommand implements Comparable<PolicyCommand> {
             }
         }*/
         return pmList;
+    }
+
+    public FlowSettings createFlowSettings(){
+        FlowSettings settings = new FlowSettings();
+        settings.setIdleTimeout((short) getIdleTimeout())
+                .setHardTimeout((short) getHardTimeout())
+                .setCommand(FlowMod.FMCommand.ADD)
+                .setBufferId(FlowMod.BUFFER_ID_NONE)
+                .setCookie(SCAgentDriver.cookie)
+                .setPriority((short) getCommandPriority())
+                .getFlags().add(FlowMod.FMFlag.SEND_FLOW_REM);
+        return settings;
     }
 
     public PolicyCommand() {

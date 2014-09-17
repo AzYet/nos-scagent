@@ -149,11 +149,10 @@ public class SCAgentApplication implements INOSApplication{
 	}
 
 	@Override
-	public void packetInEvent(INOSApi nosApi, PacketInEventVO packetIn) {	
+	public void packetInEvent(INOSApi nosApi, PacketInEventVO packetIn) {
 
         scAgentDriver.setNosApi(nosApi);
-
-		TopologyManager topologyManager = TopologyManager.getInstance();
+        TopologyManager topologyManager = TopologyManager.getInstance();
 
 		try{
 		
@@ -240,6 +239,8 @@ public class SCAgentApplication implements INOSApplication{
 			if(!macDpidPortMap.containsKey(srcMac.toString())){
 				macDpidPortMap.put(srcMac.toString(), p);
 			}
+
+            scAgentDriver.handleIncomingPackets(nosApi,packetIn);
 
 			for(LogicalSwitch sw : topologyManager.getSwitchList()){
 				if(sw.contains(p)){

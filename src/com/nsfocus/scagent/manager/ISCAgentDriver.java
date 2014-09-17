@@ -13,8 +13,8 @@ import java.util.List;
  * Created by chen on 14-9-15.
  */
 public interface ISCAgentDriver {
-
-    public String sendFlowMod(Long dpid, FlowMod flowMod);
-    public String sendFlowMod(Long dpid, MatchArguments match, FlowAction actions, FlowSettings settings);
-    public List<DpidPortPair>  computeRoute(DpidPortPair start , DpidPortPair end);
+    // members of an interface are automatically made public
+    String sendFlowMod(Long dpid, FlowMod flowMod);
+    String sendFlowMod(Long dpid, MatchArguments match, FlowAction actions, FlowSettings settings);
+    List<DpidPortPair>  computeRoute(DpidPortPair start , DpidPortPair end);
 }
