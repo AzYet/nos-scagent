@@ -66,6 +66,7 @@ public class SCAgentApplication implements INOSApplication{
 		 * OFSがControllerに接続してきたときの処理を記述する。
 		 * ここでは、OFSの初期化処理として、OFSのFlowTableのFlowEntryを全て削除する処理を記述する。
 		 */
+        scAgentDriver.setNosApi(nosApi);
 
 		if(this.topologyManager.getDpidSet().contains(datapathJoin.dpid)){
 			System.out.println(Utility.toDpidHexString(datapathJoin.dpid) + " has already joined.");

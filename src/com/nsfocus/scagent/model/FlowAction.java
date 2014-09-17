@@ -11,7 +11,7 @@ import java.util.List;
  */
 public class FlowAction {
 
-    List<Short> output = new ArrayList<Short>();        /* Output to switch port. */
+    List<Integer> output = new ArrayList<Integer>();        /* Output to switch port. */
     short vlanId;        /* Set the 802.1q VLAN id. */
     byte vlanPcp;        /* Set the 802.1q priority. */
     boolean stripVlan;      /* Strip the 802.1q header. */
@@ -24,7 +24,7 @@ public class FlowAction {
     short tpDst;         /* TCP/UDP destination port. */
     int[] enqueue = new int[2];          /* 0 port 1 queueId. Output to queue. */
 
-    public FlowAction(short port) {
+    public FlowAction(Integer port) {
         this.output.add(port);
     }
 
@@ -40,11 +40,11 @@ public class FlowAction {
         return HexString.toHexString(dlDst);
     }
 
-    public List<Short> getOutput() {
+    public List<Integer> getOutput() {
         return output;
     }
 
-    public void setOutput(List<Short> output) {
+    public void setOutput(List<Integer> output) {
         this.output = output;
     }
 

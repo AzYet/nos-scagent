@@ -3,6 +3,8 @@ package com.nsfocus.scagent.manager;
 import com.nsfocus.scagent.model.*;
 import com.nsfocus.scagent.restlet.RestApiServer;
 import com.nsfocus.scagent.utility.Cypher;
+import com.nsfocus.scagent.utility.Ethernet;
+import com.nsfocus.scagent.utility.IPv4;
 import com.nsfocus.scagent.utility.MACAddress;
 import jp.co.nttdata.ofc.common.except.NosException;
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
@@ -12,6 +14,7 @@ import jp.co.nttdata.ofc.nos.api.INOSApi;
 import jp.co.nttdata.ofc.nos.api.except.ActionNotSupportedException;
 import jp.co.nttdata.ofc.nos.api.except.ArgumentInvalidException;
 import jp.co.nttdata.ofc.nos.api.except.OFSwitchNotFoundException;
+import jp.co.nttdata.ofc.nos.api.except.SwitchPortNotFoundException;
 import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nos.ofp.common.Flow;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
@@ -22,6 +25,7 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Trunk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -34,6 +38,9 @@ public class SCAgentDriver implements ISCAgentDriver {
     public static final long cookie = 0xabcdefL;
     static Logger logger = LoggerFactory.getLogger(SCAgentDriver.class);
     private static SCAgentDriver scAgentDriver = new SCAgentDriver();
+    public Map<String, BYODRedirectCommand> redirectCommands = new HashMap<String, BYODRedirectCommand>();
+
+
     public static SCAgentDriver getInstance(){
         return scAgentDriver;
     }
@@ -43,6 +50,10 @@ public class SCAgentDriver implements ISCAgentDriver {
     public SCAgentDriver() {
         super();
 
+    }
+
+    public Map<String, BYODRedirectCommand> getRedirectCommands() {
+        return redirectCommands;
     }
 
     @Override
@@ -105,12 +116,12 @@ public class SCAgentDriver implements ISCAgentDriver {
     }
 
     public static void loadFMAction(IFlowModifier flowModifier, FlowAction action)
-            throws ActionNotSupportedException, OFSwitchNotFoundException, ArgumentInvalidException {
+            throws ActionNotSupportedException, OFSwitchNotFoundException, ArgumentInvalidException, SwitchPortNotFoundException {
         if(action == null)
             return;
         if(action.getOutput()!=null && action.getOutput().size()>0) {
             for (int o : action.getOutput()) {
-                flowModifier.setOutPort(o);
+                flowModifier.addOutputAction(o, 0);
             }
         }
         if (!Arrays.equals(new byte[6], action.getDlSrc())) {
@@ -174,6 +185,10 @@ public class SCAgentDriver implements ISCAgentDriver {
     public Flow createFlowFromMatch(MatchArguments match) {
         Integer wildcard_hints = OFPConstant.OFWildCard.ALL;
         Flow flow = new Flow();
+        if (match.getInputPort() != 0) {
+            wildcard_hints &= ~OFPConstant.OFWildCard.IN_PORT;
+            flow.inPort = match.getInputPort();
+        }
         if (!Arrays.equals(match.getDataLayerSource(), new byte[] { 0, 0, 0, 0, 0, 0 })) {
             wildcard_hints &= ~OFPConstant.OFWildCard.SRC_MACADDR;
             try {
@@ -248,6 +263,10 @@ public class SCAgentDriver implements ISCAgentDriver {
         logger.info("adding a flow: {} to {}", flowMod, dpid);
         //TODO: implement send flowMod Message
         Flow flow = createFlowFromMatch(flowMod.getMatch());
+        if (nosApi == null) {
+            logger.warn("no nosApi access, quit operation");
+            return null;
+        }
         try {
             IFlowModifier flowModifier = nosApi.createFlowModifierInstance(dpid, flow);
             loadFMAction(flowModifier, flowMod.getActions());
@@ -279,6 +298,8 @@ public class SCAgentDriver implements ISCAgentDriver {
         } catch (ArgumentInvalidException e) {
             e.printStackTrace();
         } catch (NosSocketIOException e) {
+            e.printStackTrace();
+        } catch (SwitchPortNotFoundException e) {
             e.printStackTrace();
         }
         return null;
@@ -320,7 +341,7 @@ public class SCAgentDriver implements ISCAgentDriver {
         }
         FlowAction actions = new FlowAction();
         if (!dropPacket)
-            actions.getOutput().add((short) nextAttachPoint.getPort());
+            actions.getOutput().add(nextAttachPoint.getPort());
         FlowSettings settings = new FlowSettings();
         settings.setIdleTimeout((short) policyCommand.getIdleTimeout())
                 .setHardTimeout((short) policyCommand.getHardTimeout())
@@ -339,5 +360,125 @@ public class SCAgentDriver implements ISCAgentDriver {
         if(this.nosApi == null) {
             this.nosApi = nosApi;
         }
+    }
+
+
+    public BYODRedirectCommand addPacketInRedirect(BYODRedirectCommand policyCommand) {
+        if (redirectCommands.containsKey(policyCommand.getId())) {
+            return redirectCommands.get(policyCommand.getId());
+        }
+        return this.redirectCommands.put(policyCommand.getId(),
+                policyCommand);
+    }
+
+    public List<PolicyCommand> generateInitCommands(PolicyCommand policyCommand) {
+        ArrayList<PolicyCommand> initCommands = new ArrayList<PolicyCommand>();
+        // priority=0 , inport , controller
+        if (getRedirectCommands().size() == 1) {
+            PolicyCommand controllerAllCommand = new PolicyCommand("ByodInit_0_"
+                    + policyCommand.getId(), "controllerAllCommand", 0,
+                    PolicyActionType.ALLOW_FLOW, new MatchArguments(), null, 0, 0,
+                    policyCommand.getDpid(), policyCommand.getInPort());
+            initCommands.add(controllerAllCommand);
+        }
+        // priority=1 , inport , drop
+        MatchArguments inPortMatch = new MatchArguments();
+        inPortMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand dropAllCommand = new PolicyCommand("ByodInit_1_"
+                + policyCommand.getId(), "dropAllCommand", 1,
+                PolicyActionType.DROP_FLOW, inPortMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(dropAllCommand);
+        // allow arp, priorty = 2
+        MatchArguments allowArpMatch = new MatchArguments();
+        allowArpMatch.setDataLayerType(Ethernet.TYPE_ARP);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand allowArpCommand = new PolicyCommand("ByodInit_2_"
+                + policyCommand.getId(), "AllowArp", 2,
+                PolicyActionType.ALLOW_FLOW, allowArpMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(allowArpCommand);
+        // allow dhcp, priorty = 2
+        MatchArguments allowDhcpMatch = new MatchArguments();
+        allowDhcpMatch.setDataLayerType(Ethernet.TYPE_IPv4);
+        allowDhcpMatch.setNetworkProtocol(IPv4.PROTOCOL_UDP);
+        allowDhcpMatch.setTransportDestination((short) 67);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand allowDhcpCommand = new PolicyCommand("ByodInit_3_"
+                + policyCommand.getId(), "AllowDHCP", 2,
+                PolicyActionType.ALLOW_FLOW, allowDhcpMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(allowDhcpCommand);
+
+        // allow dns, priorty = 2
+        MatchArguments allowDnsMatch = new MatchArguments();
+        allowDnsMatch.setDataLayerType(Ethernet.TYPE_IPv4);
+        allowDnsMatch.setNetworkProtocol(IPv4.PROTOCOL_UDP);
+        allowDnsMatch.setTransportDestination((short) 53);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand allowDnsCommand = new PolicyCommand("ByodInit_4_"
+                + policyCommand.getId(), "AllowDns", 2,
+                PolicyActionType.ALLOW_FLOW, allowDnsMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(allowDnsCommand);
+
+        // redirect tcp 80
+        MatchArguments httpMatch = new MatchArguments();
+        httpMatch.setDataLayerType(Ethernet.TYPE_IPv4);
+        httpMatch.setNetworkProtocol(IPv4.PROTOCOL_TCP);
+        httpMatch.setTransportDestination((short) 80);
+        allowArpMatch.setInputPort(policyCommand.getInPort());
+        PolicyCommand redirectHpptCommand = new PolicyCommand("ByodInit_5_"
+                + policyCommand.getId(), "redirectHttp", 2,
+                PolicyActionType.ALLOW_FLOW, httpMatch, null, 0, 0,
+                policyCommand.getDpid(), policyCommand.getInPort());
+        initCommands.add(redirectHpptCommand);
+        return initCommands;
+    }
+
+    public String processSingleFlowCommand(PolicyCommand policyCommand) {
+        if (RestApiServer.policyCommandsDeployed.containsKey(policyCommand.getId())) {
+            logger.error("policyCommand with the id={} exists!",
+                    policyCommand.getId());
+            return "policyCommand with the id exists!";
+        }
+        logger.info("Generating a " + policyCommand.getType() + " Message to "
+                + policyCommand.getDpid() + " inPort= "
+                + policyCommand.getInPort() + " with Match = "
+                + policyCommand.getMatch());
+
+
+        DpidPortPair tgtAp = new DpidPortPair(policyCommand.getDpid(),
+                policyCommand.getInPort());
+        if (tgtAp.getPort() == 0 && tgtAp.getDpid() == 0) {
+            logger.warn("cannot find swith port of {}:{}",
+                    policyCommand.getDpid(), policyCommand.getInPort());
+            return "cannot find switch port of " + policyCommand.getDpid()
+                    + ":" + policyCommand.getInPort();
+        }
+        Long tgtSw = tgtAp.getDpid();
+        if (!policyCommand.getMatch().isEmpty()) {
+            policyCommand.getMatch().setInputPort((short) tgtAp.getPort());
+        }
+        FlowSettings settings = new FlowSettings();
+        settings.setIdleTimeout((short) policyCommand.getIdleTimeout())
+                .setHardTimeout((short) policyCommand.getHardTimeout())
+                .setBufferId(FlowMod.BUFFER_ID_NONE)
+                .setPriority((short) policyCommand.getCommandPriority())
+                .setCookie(cookie);
+
+        ArrayList<FlowMod.FMFlag> flags = new ArrayList<FlowMod.FMFlag>();
+        flags.add(FlowMod.FMFlag.SEND_FLOW_REM);
+        settings.setFlags(flags);
+        FlowAction action = new FlowAction();
+        if (policyCommand.getType() == PolicyActionType.ALLOW_FLOW
+                || policyCommand.getType() == PolicyActionType.BYOD_ALLOW) {
+            ArrayList<Integer> ports = new ArrayList<Integer>();
+            ports.add(OFPConstant.OFPort.CONTROLLER);
+            action.setOutput(ports);
+        }
+        String ret = sendFlowMod(tgtSw, policyCommand.getMatch(), action, settings);
+        return ret;
+
     }
 }

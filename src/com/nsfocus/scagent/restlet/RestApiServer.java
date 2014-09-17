@@ -3,6 +3,8 @@ package com.nsfocus.scagent.restlet;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -142,7 +144,6 @@ public class RestApiServer extends ServerResource {
 				}
 				result = new StringRepresentation(text, MediaType.APPLICATION_JSON);
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				result = null;
 				e.printStackTrace();
 			}
@@ -168,8 +169,8 @@ public class RestApiServer extends ServerResource {
                     String status = "ok";
                     for (PolicyCommand policyCommand : policyCommands) {
                         // add redirect rules to scAgent
-                        BYODRedirectCommand addInitRes = scAgentService
-                                .addByodRedirectCommand((BYODRedirectCommand) policyCommand);
+                        BYODRedirectCommand addInitRes = scAgentDriver
+                                .addPacketInRedirect((BYODRedirectCommand) policyCommand);
                         if (addInitRes != null) {
                             res += "add policy with the same id "
                                     + policyCommand.getId() + " exists, abort.";
@@ -178,64 +179,26 @@ public class RestApiServer extends ServerResource {
                             continue;
                         }
                         // generate init commands to allow dhcp , arp , dns and redirect
-                        initCommands.addAll(generateInitCommands(policyCommand));
+                        initCommands.addAll(scAgentDriver.generateInitCommands(policyCommand));
                     }
                     // Send initiating flows generated above
                     for (PolicyCommand policyCommand : initCommands) {
-                        String s = processSingleFlowCommand(policyCommand);
+                        String s = scAgentDriver.processSingleFlowCommand(policyCommand);
                         resMap.put(policyCommand.getPolicyName(), s);
-                        if (!s.equalsIgnoreCase("ok")) {
+                        if (s==null || !s.equalsIgnoreCase("ok")) {
                             status = "error";
                         }
                     }
-                    JsonFactory jasonFactory = new JsonFactory();
-                    StringWriter writer = new StringWriter();
                     //start a thread to maitain the byod flows
-                    ScheduledExecutorService scheduledExecutor = threadPoolService.getScheduledExecutor();
-                    scheduledExecutor.schedule(new Runnable() {
-                        @Override
-                        public void run() {
-                            logger.info("start a thread to monitor the byod flows");
-                            while (true) {
-                                maintainPolicyFlows();
-                                try {
-                                    // Set the poll interval
-                                    Thread.sleep(30 * 1000);
-                                } catch (InterruptedException e) {
-                                    e.printStackTrace();
-                                }
-                                if(scAgentService.getByodRedirectCommands().size() == 0 && scAgentService.getAuthorizedMacs().size() ==0){
-                                    logger.info("no BYOD policy, stop monitor thread");
-                                    break;
-                                }
-                            }
-                        }
-                    }, 5, TimeUnit.SECONDS);
-                    try {
-                        JsonGenerator generator = jasonFactory
-                                .createGenerator(writer);
-                        generator.writeStartObject();
-                        generator.writeArrayFieldStart("result");
-                        for (String id : resMap.keySet()) {
-                            generator.writeStartObject();
-                            generator.writeStringField(id, resMap.get(id));
-                            generator.writeEndObject();
-                        }
-                        generator.writeEndArray();
-                        generator.writeStringField("status", status);
-                        generator.writeEndObject();
-                        generator.close();
-                        return writer.toString();
-                    } catch (JsonGenerationException e) {
-                        e.printStackTrace();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    return "{\"status\" : \"error\", \"result\" : \"json conversion failed. \"}";
+
+                    HashMap<String, Object> retMap = new HashMap<String, Object>();
+//                        }
+                    retMap.put("result", resMap);
+                    retMap.put("status", status);
+                    return new StringRepresentation(gson.toJson(retMap), MediaType.APPLICATION_JSON);
                 }
                 result = new StringRepresentation(gson.toJson(policyCommands),MediaType.APPLICATION_JSON);
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
@@ -282,11 +245,8 @@ public class RestApiServer extends ServerResource {
                     return "cannot find  a path ";
                 }
                 for (int j = 0; j < path.size() - 1; j += 2) {
-//                    String flowModId = pushFlowEntry(policyCommand, null,
-//                            PolicyCommandDeployed.DEFAULT_FLOW_PRIORITY,
-//                            path.get(j), path.get(j + 1), true);
                     policyCommand.getMatch().setInputPort((short) path.get(j).getPort());
-                    FlowAction action = new FlowAction((short) path.get(j + 1).getPort());
+                    FlowAction action = new FlowAction( path.get(j + 1).getPort());
                     FlowSettings settings = new FlowSettings();
                     settings.setIdleTimeout((short) policyCommand.getIdleTimeout())
                             .setHardTimeout((short) policyCommand.getHardTimeout())
@@ -435,7 +395,6 @@ public class RestApiServer extends ServerResource {
                         .get(devicesOfPrePolicy.size() - 1)
                         .getOutgressAttachmentPointInfo());
                 if (policyCommand.getType().equals(PolicyActionType.DROP_FLOW)) {
-                    // TODO: push a actions=drop flow entry
                     DpidPortPair npt = new DpidPortPair(
                             startPoint.getDpid(), startPoint.getPort());
                     MatchArguments match = policyCommand.getMatch();
@@ -472,22 +431,18 @@ public class RestApiServer extends ServerResource {
                 if (sourcePolicyCommandsWithoutInPort.containsKey(policyPrior
                         .getPolicyCommnd().getId())) { // 如果是源头且无IN端口
                     logger.info("Start AP={} is an origin SOURCE", path.get(0));
-//                    String flowModId = pushFlowEntry(policyCommand, null,
-//                            flowPriority, path.get(0), path.get(1), false);
                     MatchArguments match = policyCommand.getMatch();
                     match.setInputPort((short) 0);
-                    FlowAction action = new FlowAction((short) path.get(1).getPort());
+                    FlowAction action = new FlowAction( path.get(1).getPort());
                     FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
                     String flowModId = scAgentDriver.sendFlowMod(path.get(0).getDpid(), match, action, settings);
                     if (flowModId != null) {
                         flowModMessageIds.add(flowModId);
                     }
                 } else {
-//                    String flowModId = pushFlowEntry(policyCommand, null,
-//                            flowPriority, path.get(0), path.get(1), true);
                     MatchArguments match = policyCommand.getMatch();
                     match.setInputPort((short) path.get(1).getPort());
-                    FlowAction action = new FlowAction((short) path.get(1).getPort());
+                    FlowAction action = new FlowAction( path.get(1).getPort());
                     FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
                     String flowModId = scAgentDriver.sendFlowMod(path.get(0).getDpid(), match, action, settings);
                     if (flowModId != null) {
@@ -496,12 +451,9 @@ public class RestApiServer extends ServerResource {
                 }
                 if (path.size() > 2) {
                     for (int i = 2; i < path.size() - 1; i += 2) {
-//                        String flowModId = pushFlowEntry(policyCommand, null,
-//                                flowPriority, path.get(i), path.get(i + 1),
-//                                true);
                         MatchArguments match = policyCommand.getMatch();
                         match.setInputPort((short) path.get(i+1).getPort());
-                        FlowAction action = new FlowAction((short) path.get(i+1).getPort());
+                        FlowAction action = new FlowAction( path.get(i+1).getPort());
                         FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
                         String flowModId = scAgentDriver.sendFlowMod(path.get(i).getDpid(), match, action, settings);
 
@@ -555,11 +507,8 @@ public class RestApiServer extends ServerResource {
                 return "cannot find  a path ";
             }
             for (int i = 0; i < path.size() - 1; i += 2) {
-//                String flowModId = pushFlowEntry(
-//                        policyPosterior.getPolicyCommnd(), match, flowPriority,
-//                        path.get(i), path.get(i + 1), true);
                 match.setInputPort((short) path.get(1).getPort());
-                FlowAction action = new FlowAction((short) path.get(1).getPort());
+                FlowAction action = new FlowAction( path.get(1).getPort());
                 FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
                 String flowModId = scAgentDriver.sendFlowMod(path.get(0).getDpid(), match, action, settings);
 
@@ -640,5 +589,4 @@ public class RestApiServer extends ServerResource {
             }
         }
     }
-
 }
