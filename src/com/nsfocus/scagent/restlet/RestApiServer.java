@@ -165,16 +165,16 @@ public class RestApiServer extends ServerResource {
                     }
 				}else if (type.equals(PolicyActionType.BYOD_INIT.toString())) {
                     ArrayList<PolicyCommand> initCommands = new ArrayList<PolicyCommand>();
-                    HashMap<String, String> resMap = new HashMap<String, String>();
+                    String resStr = "";
                     String status = "ok";
                     for (PolicyCommand policyCommand : policyCommands) {
-                        // add redirect rules to scAgent
+                        // add redirect rules to Packet_In handler
                         BYODRedirectCommand addInitRes = scAgentDriver
                                 .addPacketInRedirect((BYODRedirectCommand) policyCommand);
                         if (addInitRes != null) {
                             res += "add policy with the same id "
                                     + policyCommand.getId() + " exists, abort.";
-                            resMap.put(policyCommand.getId(), "exists");
+                            resStr+=policyCommand.getId()+ ": exists";
                             status = "error";
                             continue;
                         }
@@ -184,16 +184,15 @@ public class RestApiServer extends ServerResource {
                     // Send initiating flows generated above
                     for (PolicyCommand policyCommand : initCommands) {
                         String s = scAgentDriver.processSingleFlowCommand(policyCommand);
-                        resMap.put(policyCommand.getPolicyName(), s);
-                        if (s==null || !s.equalsIgnoreCase("ok")) {
+                        resStr+= policyCommand.getPolicyName()+": "+ s+",";
+                        if (s==null) {
                             status = "error";
                         }
                     }
                     //start a thread to maitain the byod flows
 
                     HashMap<String, Object> retMap = new HashMap<String, Object>();
-//                        }
-                    retMap.put("result", resMap);
+                    retMap.put("result", resStr);
                     retMap.put("status", status);
                     return new StringRepresentation(gson.toJson(retMap), MediaType.APPLICATION_JSON);
                 }

@@ -271,6 +271,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             IFlowModifier flowModifier = nosApi.createFlowModifierInstance(dpid, flow);
             loadFMAction(flowModifier, flowMod.getActions());
             loadFMSettings(flowModifier, flowMod.getSettings());
+            // send flow now
             long res = flowModifier.send();
 
 
