@@ -223,14 +223,22 @@ public class SCAgentDriver implements ISCAgentDriver {
             wildcard_hints &= ~OFPConstant.OFWildCard.ETHER_TYPE;//Match.OFPFW_DL_TYPE;
             flow.etherType = (match.getDataLayerType());
         }
-//        if (networkSource != 0) {
-//            wildcard_hints &= ~OFWildCard.OFMatch.OFPFW_NW_DST_MASK;
-//            flow.setNetworkSource(networkSource);
-//        }
-//        if (networkDestination != 0) {
-//            wildcard_hints &= ~OFMatch.OFPFW_NW_SRC_MASK;
-//            flow.setNetworkDestination(networkDestination);
-//        }
+        if (match.getNetworkSource() != 0) {
+            wildcard_hints &= ~OFPConstant.OFWildCard.SRC_MASK;
+            try {
+                flow.srcIpaddr = new IpAddress(match.getNetworkSource());
+            } catch (NosException e) {
+                e.printStackTrace();
+            }
+        }
+        if (match.getNetworkDestination() != 0) {
+            wildcard_hints &= ~OFPConstant.OFWildCard.DST_MASK;
+            try {
+                flow.dstIpaddr = new IpAddress(match.getNetworkDestination());
+            } catch (NosException e) {
+                e.printStackTrace();
+            }
+        }
         if (match.getNetworkProtocol() != 0) {
             wildcard_hints &= ~OFPConstant.OFWildCard.NW_PROTO;//Match.OFPFW_NW_PROTO;
             flow.proto=(match.getNetworkProtocol());
@@ -445,8 +453,8 @@ public class SCAgentDriver implements ISCAgentDriver {
     }
 
     /***
-     * 
-     * @param nosApi
+     * process packet in according to policies
+     * @param nosApi api to create and send flowMod message
      * @param packetIn
      * @return true to continue , false to break;
      */
@@ -462,11 +470,6 @@ public class SCAgentDriver implements ISCAgentDriver {
             logger.warn("failed to parse data as an ethernet frame");
             return false;
         }
-//        Ethernet eth = IFloodlightProviderService.bcStore.get(cntx,
-//                IFloodlightProviderService.CONTEXT_PI_PAYLOAD);
-
-        // Ethernet ethToSend = null;
-//        eth.getDestinationMAC().toString()
         Boolean res = true;
         for (Map.Entry<String, BYODRedirectCommand> rulesEntry : RestApiServer.redirectCommands
                 .entrySet()) {
@@ -560,42 +563,27 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 // do nothing more than output
                                 IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
                                 flowModifier.addOutputAction(path.get(j+1).getPort(),0);
-                                FlowSettings settings = byodCommand.createFlowSettings();
-                                flowModifier.setFlags(toU16Flag(settings.getFlags()));
-                                flowModifier.setHardTimeoutSec(settings.getHardTimeout());
-                                flowModifier.setIdleTimeoutSec(settings.getIdleTimeout());
+                                flowModifier.setFlags(1);
+                                flowModifier.setHardTimeoutSec(5);
+                                flowModifier.setIdleTimeoutSec(0);
                                 flowModifier.setCookie(cookie);
                                 flowModifier.setAddCommand();
-                                flowModifier.setPriority(settings.getPriority());
-                                flowModifier.setBufferId(settings.getBufferId());
+                                flowModifier.setPriority(byodCommand.getCommandPriority());
+                                flowModifier.setBufferId(FlowMod.NONE_BUFFER_ID);
                                 flowModifier.send();
-//                                pushFlowEntry(byodCommand, match, path.get(j),
-//                                        path.get(j + 1), "none", 0, null, null);
                             } else {
                                 IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
-                                flowModifier.addOutputAction(path.get(j+1).getPort(),0);
                                 flowModifier.addSetDstIpaddrAction(IPv4.toIPv4Address(byodCommand.getServerIp()));
                                 flowModifier.addSetDstMacaddrAction(MACAddress.valueOf(byodCommand.getServerMac()).toLong());
-                                FlowSettings settings = byodCommand.createFlowSettings();
-                                flowModifier.setFlags(toU16Flag(settings.getFlags()));
-                                flowModifier.setHardTimeoutSec(settings.getHardTimeout());
-                                flowModifier.setIdleTimeoutSec(settings.getIdleTimeout());
+                                flowModifier.addOutputAction(path.get(j+1).getPort(),0);
+                                flowModifier.setFlags(1);
+                                flowModifier.setHardTimeoutSec(0);
+                                flowModifier.setIdleTimeoutSec(5);
                                 flowModifier.setCookie(cookie);
                                 flowModifier.setAddCommand();
-                                flowModifier.setPriority(settings.getPriority());
-                                flowModifier.setBufferId(settings.getBufferId());
+                                flowModifier.setPriority(byodCommand.getCommandPriority());
+                                flowModifier.setBufferId(FlowMod.NONE_BUFFER_ID);
                                 flowModifier.send();
-//                                pushFlowEntry(
-//                                        byodCommand,
-//                                        match,
-//                                        path.get(j),
-//                                        path.get(j + 1),
-//                                        "dst",
-//                                        IPv4.toIPv4Address(byodCommand
-//                                                .getServerIp()),
-//                                        MACAddress.valueOf(
-//                                                byodCommand.getServerMac())
-//                                                .toBytes(), null);
                             }
                         }
                         // now need to add a route back from server to device ,
@@ -625,13 +613,33 @@ public class SCAgentDriver implements ISCAgentDriver {
                             if (j != path.size() - 1) {
                                 // do nothing more than output
                                 IFlowModifier modifier1 = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match2);
-                                
-                                pushFlowEntry(byodCommand, match2, path.get(j),
-                                        path.get(j - 1), "none", 0, null, null);
+                                modifier1.setAddCommand();
+                                modifier1.setBufferId(FlowMod.NONE_BUFFER_ID);
+                                modifier1.setPriority(byodCommand.getCommandPriority());
+                                modifier1.setIdleTimeoutSec(5);
+                                modifier1.setHardTimeoutSec(0);
+                                modifier1.setFlags(1);
+                                modifier1.setCookie(cookie);
+                                // set output port
+                                modifier1.addOutputAction(path.get(j-1).getPort(),0);
+                                modifier1.send();
+
                             } else {
-                                pushFlowEntry(byodCommand, match1, path.get(j),
-                                        path.get(j - 1), "src", origNwDst,
-                                        origDlDst, eth.getSourceMACAddress());
+                                IFlowModifier modifier2 = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match2);
+                                modifier2.setAddCommand();
+                                modifier2.setBufferId(FlowMod.NONE_BUFFER_ID);
+                                modifier2.setPriority(byodCommand.getCommandPriority());
+                                modifier2.setIdleTimeoutSec(5);
+                                modifier2.setHardTimeoutSec(0);
+                                modifier2.setFlags(1);
+                                modifier2.setCookie(cookie);
+                                // set output port
+                                modifier2.addSetSrcMacaddrAction(origDlDst.toLong());
+                                modifier2.addSetDstMacaddrAction(eth.srcMacaddr.toLong());
+                                modifier2.addSetSrcIpaddrAction(origNwDst);
+                                modifier2.addOutputAction(path.get(j - 1).getPort(), 0);
+                                modifier2.send();
+
                             }
                         }
                         return false;
