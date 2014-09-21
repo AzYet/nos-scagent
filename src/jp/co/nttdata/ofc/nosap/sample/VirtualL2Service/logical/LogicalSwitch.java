@@ -2,15 +2,16 @@ package jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.logical;
 
 import java.nio.ByteBuffer;
 import java.security.NoSuchAlgorithmException;
-import java.util.HashMap;
-import java.util.Hashtable;
-import java.util.LinkedList;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import com.nsfocus.scagent.utility.Cypher;
+import com.nsfocus.scagent.utility.HexString;
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
 import jp.co.nttdata.ofc.common.util.MacAddress;
+import jp.co.nttdata.ofc.common.util.NetworkInputByteBuffer;
 import jp.co.nttdata.ofc.nos.api.IFlowModifier;
 import jp.co.nttdata.ofc.nos.api.INOSApi;
 import jp.co.nttdata.ofc.nos.api.IPacketOut;
@@ -28,6 +29,7 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.path.Path;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.path.PathManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 
+import jp.co.nttdata.ofc.protocol.packet.EthernetPDU;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -179,7 +181,7 @@ public class LogicalSwitch {
 		MacAddress srcMac = packetIn.flow.srcMacaddr;
 		MacAddress dstMac = packetIn.flow.dstMacaddr;
 
-		logger.info("srcMac:" + srcMac.toString() + ", dstMac:" + dstMac.toString()+" etherType: "+packetIn.flow.etherType);
+		System.out.println(packetIn.dpid +":"+packetIn.inPort+"srcMac:" + srcMac.toString() + ", dstMac:" + dstMac.toString()+"\n etherType: "+ Utility.toDpidHexString(packetIn.flow.etherType));
 
 		DpidPortPair p1 = this.getHost(srcMac);
 		DpidPortPair p2 = this.getHost(dstMac);
@@ -188,27 +190,33 @@ public class LogicalSwitch {
 		//to prevent broadcast storm 
 		
 		if(isMultiCastAddr(dstMac) && antiStorm(packetIn)){
-			logger.info("droped a multicast pkt: srcMac="+ packetIn.flow.srcMacaddr + 
-					" dstMac=" + packetIn.flow.dstMacaddr);
+			logger.info("droped a multicast pkt, dpid: {}, inPort: {} srcMac="+ packetIn.flow.srcMacaddr +
+					" dstMac=" + packetIn.flow.dstMacaddr,packetIn.dpid,packetIn.inPort);
 			return;
 		}
 		
-		if((p1 != null) && ((p1.getDpid() != packetIn.dpid) || (p1.getPort() != inPort))){
-			this.removeMac(srcMac);
+		if((p1 != null) && ((p1.getDpid() != packetIn.dpid) || (p1.getPort() != inPort))) {
+            //PC_Chen: TODO: if this packet was broadcast, just ignore it
+            if (unicastPacketMulticast.containsKey(Cypher.getMD5(packetIn.data))) {
+                logger.info("ignore a multicast unicast pkt, {}-{} srcMac="+ packetIn.flow.srcMacaddr +
+                        " dstMac=" + packetIn.flow.dstMacaddr+" "+packetIn.flow.etherType ,packetIn.dpid,packetIn.inPort);
+                return;
 
-			Flow flow1 = Utility.createFlow(-1, srcMac, null, -1);
-			Flow flow2 = Utility.createFlow(-1, null, srcMac, -1);
+            }
+            this.removeMac(srcMac);
 
-			for(long dpid : topologyManager.getDpidSet()){
-				this.deleteFlowEntry(nosApi, dpid, flow1);
-				this.deleteFlowEntry(nosApi, dpid, flow2);
-			}
+            Flow flow1 = Utility.createFlow(-1, srcMac, null, -1);
+            Flow flow2 = Utility.createFlow(-1, null, srcMac, -1);
 
-			pathManager.removeElements(srcMac);
+            for (long dpid : topologyManager.getDpidSet()) {
+                this.deleteFlowEntry(nosApi, dpid, flow1);
+                this.deleteFlowEntry(nosApi, dpid, flow2);
+            }
 
-			System.out.println("Delete FlowEntries related MACAddress " + srcMac.toString());
-		}
-		else if((p1 != null) && (p2 != null)){
+            pathManager.removeElements(srcMac);
+
+            System.out.println("Delete FlowEntries related MACAddress " + srcMac.toString());
+        } else if((p1 != null) && (p2 != null)){
 			long cookie;
 			Path path;
 			Flow flow;
@@ -263,7 +271,16 @@ public class LogicalSwitch {
 			if((p1 == null) && (p2 != null)){
 				System.out.println("[p2] " + Utility.toDpidHexString(p2.getDpid()) + ":" + p2.getPort());
 			}
-			this.packetOutToAll(nosApi, packetIn, inPort);
+
+            //PC_Chen
+            //if it's a unicast packet, record it
+            if (!isMultiCastAddr(packetIn.flow.dstMacaddr)) {
+                String hash = getMD5(packetIn.data);
+                if (!unicastPacketMulticast.containsKey(hash)) {
+                    unicastPacketMulticast.put(hash, System.currentTimeMillis());
+                }
+            }
+            this.packetOutToAll(nosApi, packetIn, inPort);
 		}
 		synchronized(this.dppl){
 			for(DpidPortPair p : this.dppl){
@@ -286,9 +303,33 @@ public class LogicalSwitch {
 		return true;
 	}
 
-	public static final int BCAST_INTERVAL = 1000;
-	//dpidPktPortTimeMap 
-	Map<Long, HashMap<String, Long[]>> dpidPktPortTimeMap = new HashMap<Long,HashMap<String,Long[]>>();
+	private static final int BCAST_INTERVAL = 1000;
+	private static final int RECYCLE_INTERVAL = 300*1000;
+	//dpidPktPortTimeMap, <dpid, <pktHash, port&time>>
+	static Map<Long, HashMap<String, Long[]>> dpidPktPortTimeMap = new ConcurrentHashMap<Long, HashMap<String, Long[]>>();
+    static Map<String,Long> unicastPacketMulticast = new ConcurrentHashMap<String, Long>();
+    static {
+        Timer timer = new Timer("recycle task");
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                for (Entry<Long, HashMap<String, Long[]>> stringHashMap : dpidPktPortTimeMap.entrySet()) {
+                    for (Entry<String, Long[]> portTime : stringHashMap.getValue().entrySet()) {
+                        long time = System.currentTimeMillis() - portTime.getValue()[1];
+                        if (time > RECYCLE_INTERVAL) {
+                            stringHashMap.getValue().remove(portTime.getKey());
+                        }
+                    }
+                }
+                for (Entry<String, Long> stringLongEntry : unicastPacketMulticast.entrySet()) {
+                    long interval = System.currentTimeMillis() - stringLongEntry.getValue();
+                    if (interval > RECYCLE_INTERVAL) {
+                        unicastPacketMulticast.remove(stringLongEntry.getKey());
+                    }
+                }
+            }
+        },10000,RECYCLE_INTERVAL);
+    }
 
 	private boolean antiStorm(PacketInEventVO packetIn) {
 		String hash = getMD5(packetIn.data);
@@ -426,7 +467,9 @@ public class LogicalSwitch {
 
 	// 同一SWに属する受信ポート以外の全てのポートに転送する
 	private long packetOutToAll(INOSApi nosApi, PacketInEventVO packetIn, int inPort){
-		
+        EthernetPDU eth = new EthernetPDU();
+        eth.parse(new NetworkInputByteBuffer(packetIn.data));
+        System.out.println("packetOut to all on dpid:"+packetIn.dpid+":"+packetIn.inPort+","+eth.srcMacaddr+"->"+eth.dstMacaddr+" etherType: "+eth.etherType);
 		long ret = 0L;
 //		if(antiStorm(packetIn)){
 //			return ret;
@@ -438,6 +481,7 @@ public class LogicalSwitch {
 			if((this.dpid == packetIn.dpid && port == packetIn.inPort) || port == OFPort.LOCAL){
 			//if((p.getDpid() == packetIn.dpid) && (p.getPort() == packetIn.inPort)){
 				continue;
+
 			}
 
 			try {

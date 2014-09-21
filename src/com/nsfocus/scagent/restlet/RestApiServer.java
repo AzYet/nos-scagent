@@ -67,7 +67,37 @@ public class RestApiServer extends ServerResource {
 		logger.debug("test_______________________________");
 	}
 
-	@Get("json")
+    @Get("json")
+    public String getPolicyCommands() {
+        HashSet<PolicyCommand> res = new HashSet<PolicyCommand>();
+        Form queryParams = getQuery();
+        String type = queryParams.getFirstValue("type");
+        Gson gson = new Gson();
+        if (type == null) {
+            //TODO : return all policy Commands
+            for (Map.Entry<String, PolicyCommandDeployed> pde : policyCommandsDeployed.entrySet()) {
+                PolicyCommand policyCommand = pde.getValue().getPolicyCommand();
+                if (!policyCommand.getId().startsWith("ByodInit_"))
+                    res.add(policyCommand);
+            }
+            res.addAll(allowPolicies.values());
+        } else if (type.equalsIgnoreCase("byod-allow")) {
+            for (PolicyCommand p : allowPolicies.values()) {
+                if (p.getType() == PolicyActionType.BYOD_ALLOW) {
+                    res.add(p);
+                }
+            }
+        } else if (type.equalsIgnoreCase("byod-init")) {
+            for (BYODRedirectCommand p : redirectCommands.values()) {
+                if (p.getType() == PolicyActionType.BYOD_INIT) {
+                    res.add(p);
+                }
+            }
+        }
+        return gson.toJson(res);
+    }
+
+	/*@Get("json")
 	public String handleGetRequest() {
         ServerResource restApi = (ServerResource) getContext().getAttributes().get(this.getClass().getCanonicalName());
         String type = (String) getRequestAttributes().get("op");
@@ -123,7 +153,7 @@ public class RestApiServer extends ServerResource {
 		// + getRootRef() + '\n' + "Routed part   : "
 		// + getReference().getBaseRef() + '\n' + "Remaining part: "
 		// + getReference().getRemainingPart();
-	}
+	}*/
 
 	@Post
 	public Representation handlePostRequest(Representation entity) {

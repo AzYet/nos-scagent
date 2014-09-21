@@ -27,6 +27,7 @@ import jp.co.nttdata.ofc.nos.api.vo.event.GetConfigReplyEventVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.PacketInEventVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.PortStatusEventVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.QueueGetConfigReplyEventVO;
+import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nos.ofp.common.Flow;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.NosFactory;
@@ -212,45 +213,49 @@ public class SCAgentApplication implements INOSApplication{
 				System.out.println("LLDP packet is detected, but OFC does not work LLDP mode.");
 			}
 		} else {
-			System.out.println("\npacketInEvent has invoked from " + Utility.toDpidHexString(packetIn.dpid) + ":" + packetIn.inPort + ".");
-			DpidPortPair host = topologyManager.findDpidPortPair(packetIn.dpid, packetIn.inPort);
-			if(host == null){
-				host = new DpidPortPair(packetIn.dpid, packetIn.inPort);
-				topologyManager.addHost(host);
-			}
-			
-			String dpid = String.valueOf(packetIn.dpid);
-			LogicalSwitch srcSw = topologyManager.getSwitchByName(dpid);
-			if(srcSw == null){
-				srcSw = new LogicalSwitch(dpid); 
-				topologyManager.getSwitchList().add(srcSw);
-			}
+            if (packetIn.inPort == OFPConstant.OFPort.NONE) {
+                System.out.println("ignoring packet from port any on dpid:"+packetIn.dpid);
+                return;
+            }
+            System.out.println("\npacketInEvent has invoked from " + Utility.toDpidHexString(packetIn.dpid)
+                    + ":" + packetIn.inPort+":"+packetIn.flow.srcMacaddr+"--"+packetIn.flow.dstMacaddr + "etherType: "+packetIn.flow.etherType+ ".");
+            DpidPortPair host = topologyManager.findDpidPortPair(packetIn.dpid, packetIn.inPort);
+            if (host == null) {
+                host = new DpidPortPair(packetIn.dpid, packetIn.inPort);
+                topologyManager.addHost(host);
+            }
+            String dpid = String.valueOf(packetIn.dpid);
+            LogicalSwitch srcSw = topologyManager.getSwitchByName(dpid);
+            if (srcSw == null) {
+                srcSw = new LogicalSwitch(dpid);
+                topologyManager.getSwitchList().add(srcSw);
+            }
 
-			if(!srcSw.contains(host))
-				srcSw.add(host);
+            if (!srcSw.contains(host))
+                srcSw.add(host);
 
-			MacAddress srcMac = packetIn.flow.srcMacaddr;
-			if(!srcSw.contains(srcMac))
-				srcSw.addMac(srcMac, host);
-			
-			
-			DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
-			//PC_Chen
-			if(!macDpidPortMap.containsKey(srcMac.toString())){
-				macDpidPortMap.put(srcMac.toString(), p);
-			}
+            MacAddress srcMac = packetIn.flow.srcMacaddr;
+            if (!srcSw.contains(srcMac))
+                srcSw.addMac(srcMac, host);
 
-            scAgentDriver.handleIncomingPackets(nosApi,packetIn);
 
-			for(LogicalSwitch sw : topologyManager.getSwitchList()){
-				if(sw.contains(p)){
-					sw.packetIn(nosApi, packetIn);
-					return;
-				}
-			}
-			System.out.println("No switch is matched, "+packetIn.dpid +"/" +packetIn.inPort);
-		}
-		}catch(Exception e){
+            DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
+            //PC_Chen
+            if (!macDpidPortMap.containsKey(srcMac.toString())) {
+                macDpidPortMap.put(srcMac.toString(), p);
+            }
+
+            scAgentDriver.handleIncomingPackets(nosApi, packetIn);
+
+            for (LogicalSwitch sw : topologyManager.getSwitchList()) {
+                if (sw.contains(p)) {
+                    sw.packetIn(nosApi, packetIn);
+                    return;
+                }
+            }
+            System.out.println("No switch is matched, " + packetIn.dpid + "/" + packetIn.inPort);
+        }
+        }catch(Exception e){
 			System.err.println("Error during packet in....");
 			e.printStackTrace();
 		}
