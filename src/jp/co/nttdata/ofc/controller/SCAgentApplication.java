@@ -15,6 +15,7 @@ import jp.co.nttdata.ofc.common.util.Translator;
 import jp.co.nttdata.ofc.nos.api.IFlowModifier;
 import jp.co.nttdata.ofc.nos.api.INOSApi;
 import jp.co.nttdata.ofc.nos.api.INOSApplication;
+import jp.co.nttdata.ofc.nos.api.except.ArgumentInvalidException;
 import jp.co.nttdata.ofc.nos.api.except.OFSwitchNotFoundException;
 import jp.co.nttdata.ofc.nos.api.vo.PhysicalPortVO;
 import jp.co.nttdata.ofc.nos.api.vo.event.BarrierReplyEventVO;
@@ -74,7 +75,19 @@ public class SCAgentApplication implements INOSApplication{
 			return;
 		}
 
-		for(PhysicalPortVO port : datapathJoin.physiPorts){
+        //PC_Chen
+        //send set-config message , set missSendLen 0xffff
+        try {
+            nosApi.sendSetConfigRequest(datapathJoin.dpid, 0, 0xffff);
+        } catch (NosSocketIOException e) {
+            e.printStackTrace();
+        } catch (OFSwitchNotFoundException e) {
+            e.printStackTrace();
+        } catch (ArgumentInvalidException e) {
+            e.printStackTrace();
+        }
+
+        for(PhysicalPortVO port : datapathJoin.physiPorts){
 			System.out.println("portName: "+port.portName);
 			System.out.println("portNo: "+port.portNo);
 			System.out.println("portMAC: "+port.macaddr);

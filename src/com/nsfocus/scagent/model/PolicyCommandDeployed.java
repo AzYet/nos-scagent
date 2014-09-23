@@ -292,7 +292,6 @@ public class PolicyCommandDeployed implements Comparable<PolicyCommandDeployed>{
 	/**
 	 * remove policies been covered by <i>policy</i>
 	 * @return list of policies deleted: List PolicyRelated
-	 * @param asc the order is ascendency
 	 */
 	public static List<PolicyCommandRelated> removeCoveredPolicies(PolicyCommand policy ,PolicyCommandDeployed policyCommandDeployed,Direction direction){
 		//		public static List<PolicyRelated> removeCoveredPolicies(Policy policy ,PolicyRelated hostPolicy, Map<String,PolicyRelated>relatedMap,Direction direction){

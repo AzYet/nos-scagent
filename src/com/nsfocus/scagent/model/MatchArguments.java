@@ -32,9 +32,6 @@ public class MatchArguments {
     protected short transportSource;
     protected short transportDestination;
 
-    /**
-     * @param args
-     */
     public MatchArguments() {
         this.wildcards = OFPFW_ALL;
         this.dataLayerDestination = new byte[] { 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 };
@@ -331,16 +328,22 @@ public class MatchArguments {
         this.inputPort = inputPort;
     }
 
-    public byte[] getDataLayerSource() {
+    public byte[] getDataLayerSourceBytes() {
         return dataLayerSource;
+    }
+    public String getDataLayerSource() {
+        return MACAddress.valueOf(dataLayerSource).toString();
     }
 
     public void setDataLayerSource(byte[] dataLayerSource) {
         this.dataLayerSource = dataLayerSource;
     }
 
-    public byte[] getDataLayerDestination() {
+    public byte[] getDataLayerDestinationBytes() {
         return dataLayerDestination;
+    }
+    public String getDataLayerDestination() {
+        return MACAddress.valueOf(dataLayerDestination).toString();
     }
 
     public void setDataLayerDestination(byte[] dataLayerDestination) {

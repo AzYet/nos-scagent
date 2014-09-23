@@ -1,5 +1,9 @@
 package com.nsfocus.scagent.model;
 
+import com.nsfocus.scagent.utility.MACAddress;
+
+import java.util.Arrays;
+
 public class AttachmentPointInfo {
     byte[] mac = null;
 	String attchmentPoint = null;  //some string like "3.3.3.3:tap1"
@@ -25,4 +29,11 @@ public class AttachmentPointInfo {
 		this.attchmentPoint = attchmentPoint;
 	}
 
+    @Override
+    public String toString() {
+        return "AttachmentPointInfo{" +
+                "mac=" + MACAddress.valueOf(mac) +
+                ", attchmentPoint='" + attchmentPoint + '\'' +
+                '}';
+    }
 }

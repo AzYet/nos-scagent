@@ -1,21 +1,20 @@
 package com.nsfocus.scagent.restlet;
 
 import java.io.IOException;
-import java.io.StringWriter;
 import java.util.*;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import com.nsfocus.scagent.device.DeviceManager;
 import com.nsfocus.scagent.manager.SCAgentDriver;
 import com.nsfocus.scagent.model.*;
 import com.nsfocus.scagent.utility.Ethernet;
 import com.nsfocus.scagent.utility.HexString;
 import com.nsfocus.scagent.utility.IPv4;
+import com.nsfocus.scagent.utility.MACAddress;
 import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
-import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 
 import org.restlet.Component;
 import org.restlet.data.Form;
@@ -34,12 +33,11 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.nsfocus.scagent.device.DeviceManager;
 
 public class RestApiServer extends ServerResource {
 
     private static final int ORIGIN_DESTINATION_PRIORITY = -1;
-    private static final int ORIGIN_SOURCE_PRIORITY = -1;
+    private static final int ORIGIN_SOURCE_PRIORITY = 65536;
     protected static Logger logger = LoggerFactory
     .getLogger(RestApiServer.class);
     private static final int DEFAULT_IDLE_TIMEOUT = 5000;
@@ -69,32 +67,49 @@ public class RestApiServer extends ServerResource {
 
     @Get("json")
     public String getPolicyCommands() {
-        HashSet<PolicyCommand> res = new HashSet<PolicyCommand>();
-        Form queryParams = getQuery();
-        String type = queryParams.getFirstValue("type");
+        String op = (String) getRequestAttributes().get("op");
+        Form form = getQuery();
         Gson gson = new Gson();
-        if (type == null) {
-            //TODO : return all policy Commands
-            for (Map.Entry<String, PolicyCommandDeployed> pde : policyCommandsDeployed.entrySet()) {
-                PolicyCommand policyCommand = pde.getValue().getPolicyCommand();
-                if (!policyCommand.getId().startsWith("ByodInit_"))
-                    res.add(policyCommand);
+        if (op.equalsIgnoreCase("policyaction")) {
+            HashSet<PolicyCommand> res = new HashSet<PolicyCommand>();
+            String type = form.getFirstValue("type");
+            if (type == null) {
+                //TODO : return all policy Commands
+                for (Map.Entry<String, PolicyCommandDeployed> pde : policyCommandsDeployed.entrySet()) {
+                    PolicyCommand policyCommand = pde.getValue().getPolicyCommand();
+                    if (!policyCommand.getId().startsWith("ByodInit_"))
+                        res.add(policyCommand);
+                }
+                res.addAll(allowPolicies.values());
+                res.addAll(redirectCommands.values());
+
             }
-            res.addAll(allowPolicies.values());
-        } else if (type.equalsIgnoreCase("byod-allow")) {
-            for (PolicyCommand p : allowPolicies.values()) {
-                if (p.getType() == PolicyActionType.BYOD_ALLOW) {
-                    res.add(p);
+            else if (op.equalsIgnoreCase("byod-allow")) {
+                for (PolicyCommand p : allowPolicies.values()) {
+                    if (p.getType() == PolicyActionType.BYOD_ALLOW) {
+                        res.add(p);
+                    }
+                }
+            } else if (op.equalsIgnoreCase("byod-init")) {
+                for (BYODRedirectCommand p : redirectCommands.values()) {
+                    if (p.getType() == PolicyActionType.BYOD_INIT) {
+                        res.add(p);
+                    }
                 }
             }
-        } else if (type.equalsIgnoreCase("byod-init")) {
-            for (BYODRedirectCommand p : redirectCommands.values()) {
-                if (p.getType() == PolicyActionType.BYOD_INIT) {
-                    res.add(p);
-                }
+            return gson.toJson(res);
+        }else if(op.equalsIgnoreCase("device")){
+            String mac = form.getFirstValue("mac");
+            if (mac != null) {
+                DpidPortPair dpidPort = DeviceManager.getInstance()
+                        .findHostByMac(mac);
+                return gson.toJson(dpidPort);
+            } else {
+                return gson.toJson(DeviceManager.getInstance()
+                        .getMacDpidPortMap());
             }
         }
-        return gson.toJson(res);
+        return "{}";
     }
 
 	/*@Get("json")
@@ -157,176 +172,156 @@ public class RestApiServer extends ServerResource {
 
 	@Post
 	public Representation handlePostRequest(Representation entity) {
-		String op = (String) getRequestAttributes().get("op");
-
-		Representation result = null;
-		// Parse the given representation and retrieve data
-		if(op.equalsIgnoreCase("test")){
-			try {
-				String text = entity.getText();
-				Gson gson = new Gson();
-				JsonParser parser = new JsonParser();
-				JsonObject rootNode = parser.parse(text).getAsJsonObject();
-				String id = rootNode.get("id").getAsString();
-				System.out.println("id: " + id);
-				JsonArray ifs = rootNode.get("ifs").getAsJsonArray();
-				for (int i = 0; i < ifs.size(); i++) {
-					JsonObject ifObj = gson.fromJson(ifs.get(i), JsonObject.class);
-					JsonElement jsonElement = ifObj.get("abc");
-					String connectTo = ifObj.get("connect_to").getAsString();
-					String mac = ifObj.get("mac").getAsString();
-					System.out
-					.println("connect_to:" + connectTo + "\t mac: " + mac);
-				}
-				result = new StringRepresentation(text, MediaType.APPLICATION_JSON);
-			} catch (IOException e) {
-				result = null;
-				e.printStackTrace();
-			}
-		}else if (op.equalsIgnoreCase("policyaction")){
-			String text;
-			try {
-				text = entity.getText(); // throw exception
-				Gson gson = new Gson();
-				JsonParser parser = new JsonParser();
-				JsonObject rootNode = parser.parse(text).getAsJsonObject();
-				String type = rootNode.get("type").getAsString();
-		        List<? extends PolicyCommand> policyCommands = PolicyCommand.fromJson(
-		                rootNode, PolicyActionType.valueOf(type));
-                String res = "";
-				if(type.equalsIgnoreCase("REDIRECT_FLOW")){
-		            logger.info("Start to handle " + type + " policyCommands");
-                    for (PolicyCommand policyCommand : policyCommands) {
-                        res += processRedirectFlowCommand(policyCommand);
-                    }
-				}else if (type.equals(PolicyActionType.BYOD_INIT.toString())) {
-                    ArrayList<PolicyCommand> initCommands = new ArrayList<PolicyCommand>();
-                    String resStr = "";
-                    String status = "ok";
-                    for (PolicyCommand policyCommand : policyCommands) {
-                        // add redirect rules to Packet_In handler
-                        BYODRedirectCommand addInitRes =addPacketInRedirect((BYODRedirectCommand) policyCommand);
-                        if (addInitRes != null) {
-                            res += "add policy with the same id "
-                                    + policyCommand.getId() + " exists, abort.";
-                            resStr+=policyCommand.getId()+ ": exists";
-                            status = "error";
-                            continue;
-                        }
-                        // generate init commands to allow dhcp , arp , dns and redirect
-                        initCommands.addAll(generateInitCommands(policyCommand));
-                    }
-                    // Send initiating flows generated above
-                    for (PolicyCommand policyCommand : initCommands) {
-                        String s = scAgentDriver.processSingleFlowCommand(policyCommand);
-                        resStr+= policyCommand.getPolicyName()+": "+ s+",";
-                        if (s==null) {
-                            status = "error";
-                        }
-                    }
-                    //start a thread to maitain the byod flows
-
-                    HashMap<String, Object> retMap = new HashMap<String, Object>();
-                    retMap.put("result", resStr);
-                    retMap.put("status", status);
-                    return new StringRepresentation(gson.toJson(retMap), MediaType.APPLICATION_JSON);
-                }else if (type.equalsIgnoreCase(PolicyActionType.BYOD_ALLOW.toString())) {
-                    String resStr = "";
-                    String status = "ok";
-                    for (final PolicyCommand policyCommand : policyCommands) {
-                        PolicyCommand addpolicyRes = addToAllowPolicies(policyCommand);
-                        if (addpolicyRes != null) {
-                            res += "add policy with the same id "
-                                    + policyCommand.getId() + " exists, abort.";
-                            resStr += policyCommand.getId() + ": exists";
-                            status = "error";
-                            continue;
-                        }
-                        //delete previous flow if exists
-                        // >>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
-//                        OFFlowMod fm = (OFFlowMod) floodlightProvider.getOFMessageFactory()
-//                                .getMessage(OFType.FLOW_MOD);
-//                        IOFSwitch sw = floodlightProvider.getSwitch(policyCommand.getDpid());
-//                        long cookie = AppCookie.makeCookie(FORWARDING_APP_ID, 0);
-//                        OFMatch match;
-//                        match = policyCommand.getMatch().toOFMatch();
-//                        match.setWildcards(match.getWildcards() & ~OFMatch.OFPFW_IN_PORT);
-//                        match.setInputPort(policyCommand.getInPort());
-                        MatchArguments match = policyCommand.getMatch();
-                        match.setWildcards(match.getWildcards() & ~OFPConstant.OFWildCard.IN_PORT);
-                        match.setInputPort(policyCommand.getInPort());
-                        FlowAction action = new FlowAction(OFPConstant.OFPort.CONTROLLER);
-//                        List<OFAction> actions = new ArrayList<OFAction>();
-//                        actions.add(new OFActionOutput(OFPConstant.OFPort.OFPP_CONTROLLER.getValue(),
-//                                (short) 0xFFFF)); // OFPort.OFPP_NONE;
-                        FlowSettings settings = policyCommand.createFlowSettings();
-//                        fm.setIdleTimeout((short) policyCommand.getIdleTimeout())
-//                                .setHardTimeout((short) policyCommand.getHardTimeout())
-//                                .setBufferId(OFPacketOut.BUFFER_ID_NONE)
-//                                .setCommand(OFFlowMod.OFPFC_DELETE_STRICT).setMatch(match)
-//                                .setActions(actions);
-//                        fm.setOutPort(OFPConstant.OFPort.OFPP_CONTROLLER);
-//                        fm.setFlags(OFFlowMod.OFPFF_SEND_FLOW_REM);
-//                        fm.setCookie(cookie);
-//                        fm.setPriority((short) policyCommand.getCommandPriority());
-//                        fm.setLengthU(OFFlowMod.MINIMUM_LENGTH + OFActionOutput.MINIMUM_LENGTH);
-                        if (policyCommand.getDpid() != 0) {
-                            String flowModId = scAgentDriver.sendFlowMod(policyCommand.getDpid(), match, action, settings);
-                            resStr += policyCommand.getId() + ": " + flowModId;
-                            if (flowModId == null) {
-                                status = "error";
-                            }
-                        } else {
-                            status = "error";
-                            logger.warn("cannot find sw: {}, abort!", policyCommand.getDpid());
-                        }
-                        if (policyCommand.getHardTimeout() != 0) {
-                            final PolicyCommand restorePolicy = new PolicyCommand(
-                                    policyCommand.getId(),
-                                    PolicyActionType.RESTORE_BYOD_ALLOW,
-                                    policyCommand.getHardTimeout());
-                            ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
-
-                            final List<PolicyCommand> restoreCommands = new ArrayList<PolicyCommand>() {
-                                private static final long serialVersionUID = 1L;
-
-                                {
-                                    add(restorePolicy);
-                                }
-                            };
-                            scheduledExecutor.schedule(new Runnable() {
-
-                                @Override
-                                public void run() {
-                                    scAgentDriver.deletePolicies(restorePolicy.getType(),
-                                            restoreCommands);
-                                    removeFromAllowPolicies(policyCommand
-                                            .getId());
-                                }
-
-                            }, policyCommand.getHardTimeout(), TimeUnit.SECONDS);
-                        }
-                    }
-                    HashMap<String, String> retMap = new HashMap<String, String>();
-                    retMap.put("status", status);
-                    retMap.put("result", resStr);
-                    return new StringRepresentation(gson.toJson(retMap));
+        String op = (String) getRequestAttributes().get("op");
+        Gson gson = new Gson();
+        Representation result = null;
+        String text = null;
+        try {
+            text = entity.getText();
+        } catch (IOException e) {
+            e.printStackTrace();
+            HashMap<String, String> res = new HashMap<String, String>();
+            res.put("status", "error");
+            res.put("result", "wrong data");
+            return new StringRepresentation(gson.toJson(res), MediaType.APPLICATION_JSON);
+        }
+        JsonParser parser = new JsonParser();
+        // Parse the given representation and retrieve data
+        if (op.equalsIgnoreCase("device")) {
+            JsonObject rootNode = parser.parse(text).getAsJsonObject();
+            Map<String, DpidPortPair> dpidPortPairHashMap = DeviceManager.getInstance().getMacDpidPortMap();
+            for (Map.Entry<String, JsonElement> stringJsonElementEntry : rootNode.entrySet()) {
+                JsonObject swPort = stringJsonElementEntry.getValue().getAsJsonObject();
+                String mac = stringJsonElementEntry.getKey();
+                long dpid = swPort.get("dpid").getAsLong();
+                int port = swPort.get("port").getAsInt();
+                dpidPortPairHashMap.put(mac, new DpidPortPair(dpid, port));
+            }
+            return new StringRepresentation(gson.toJson(dpidPortPairHashMap), MediaType.APPLICATION_JSON);
+        } else if (op.equalsIgnoreCase("test")) {
+            JsonObject rootNode = parser.parse(text).getAsJsonObject();
+            String id = rootNode.get("id").getAsString();
+            System.out.println("id: " + id);
+            JsonArray ifs = rootNode.get("ifs").getAsJsonArray();
+            for (int i = 0; i < ifs.size(); i++) {
+                JsonObject ifObj = gson.fromJson(ifs.get(i), JsonObject.class);
+                JsonElement jsonElement = ifObj.get("abc");
+                String connectTo = ifObj.get("connect_to").getAsString();
+                String mac = ifObj.get("mac").getAsString();
+                System.out
+                        .println("connect_to:" + connectTo + "\t mac: " + mac);
+            }
+            result = new StringRepresentation(text, MediaType.APPLICATION_JSON);
+        } else if (op.equalsIgnoreCase("policyaction")) {
+            JsonObject rootNode = parser.parse(text).getAsJsonObject();
+            String type = rootNode.get("type").getAsString();
+            List<? extends PolicyCommand> policyCommands = PolicyCommand.fromJson(
+                    rootNode, PolicyActionType.valueOf(type));
+            String res = "";
+            if (type.equalsIgnoreCase("REDIRECT_FLOW")) {
+                logger.info("Start to handle " + type + " policyCommands");
+                for (PolicyCommand policyCommand : policyCommands) {
+                    res += processRedirectFlowCommand(policyCommand);
                 }
-                result = new StringRepresentation(gson.toJson(policyCommands),MediaType.APPLICATION_JSON);
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
+            } else if (type.equals(PolicyActionType.BYOD_INIT.toString())) {
+                ArrayList<PolicyCommand> initCommands = new ArrayList<PolicyCommand>();
+                String resStr = "";
+                String status = "ok";
+                for (PolicyCommand policyCommand : policyCommands) {
+                    // add redirect rules to Packet_In handler
+                    BYODRedirectCommand addInitRes = addPacketInRedirect((BYODRedirectCommand) policyCommand);
+                    if (addInitRes != null) {
+                        res += "add policy with the same id "
+                                + policyCommand.getId() + " exists, abort.";
+                        resStr += policyCommand.getId() + ": exists";
+                        status = "error";
+                        continue;
+                    }
+                    // generate init commands to allow dhcp , arp , dns and redirect
+                    initCommands.addAll(generateInitCommands(policyCommand));
+                }
+                // Send initiating flows generated above
+                for (PolicyCommand policyCommand : initCommands) {
+                    String s = scAgentDriver.processSingleFlowCommand(policyCommand);
+                    resStr += policyCommand.getPolicyName() + ": " + s + ",";
+                    if (s == null) {
+                        status = "error";
+                    }
+                }
+                //start a thread to maitain the byod flows
 
-		return result;
-	}
+                HashMap<String, Object> retMap = new HashMap<String, Object>();
+                retMap.put("result", resStr);
+                retMap.put("status", status);
+                return new StringRepresentation(gson.toJson(retMap), MediaType.APPLICATION_JSON);
+            } else if (type.equalsIgnoreCase(PolicyActionType.BYOD_ALLOW.toString())) {
+                String resStr = "";
+                String status = "ok";
+                for (final PolicyCommand policyCommand : policyCommands) {
+                    PolicyCommand addpolicyRes = addToAllowPolicies(policyCommand);
+                    if (addpolicyRes != null) {
+                        res += "add policy with the same id "
+                                + policyCommand.getId() + " exists, abort.";
+                        resStr += policyCommand.getId() + ": exists";
+                        status = "error";
+                        continue;
+                    }
+                    //delete previous flow if exists
+                    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-    List<DpidPortPair> computeRoute(DpidPortPair start, DpidPortPair end){
-        List<DpidPortPair> path = new ArrayList<DpidPortPair>();
-        //TODO
-        return path;
-    }
+                    MatchArguments match = policyCommand.getMatch();
+                    match.setWildcards(match.getWildcards() & ~OFPConstant.OFWildCard.IN_PORT);
+                    match.setInputPort(policyCommand.getInPort());
+                    FlowAction action = new FlowAction(OFPConstant.OFPort.CONTROLLER);
+                    FlowSettings settings = policyCommand.createFlowSettings();
+                    if (policyCommand.getDpid() != 0) {
+                        String flowModId = scAgentDriver.sendFlowMod(policyCommand.getDpid(), match, action, settings);
+                        resStr += policyCommand.getId() + ": " + flowModId;
+                        if (flowModId == null) {
+                            status = "error";
+                        }
+                    } else {
+                        status = "error";
+                        logger.warn("cannot find sw: {}, abort!", policyCommand.getDpid());
+                    }
+                    if (policyCommand.getHardTimeout() != 0) {
+                        final PolicyCommand restorePolicy = new PolicyCommand(
+                                policyCommand.getId(),
+                                PolicyActionType.RESTORE_BYOD_ALLOW,
+                                policyCommand.getHardTimeout());
+                        ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
+
+                        final List<PolicyCommand> restoreCommands = new ArrayList<PolicyCommand>() {
+                            private static final long serialVersionUID = 1L;
+
+                            {
+                                add(restorePolicy);
+                            }
+                        };
+                        scheduledExecutor.schedule(new Runnable() {
+
+                            @Override
+                            public void run() {
+                                scAgentDriver.deletePolicies(restorePolicy.getType(),
+                                        restoreCommands);
+                                removeFromAllowPolicies(policyCommand
+                                        .getId());
+                            }
+
+                        }, policyCommand.getHardTimeout(), TimeUnit.SECONDS);
+                    }
+                }
+                HashMap<String, String> retMap = new HashMap<String, String>();
+                retMap.put("status", status);
+                retMap.put("result", resStr);
+                return new StringRepresentation(gson.toJson(retMap));
+            }
+            result = new StringRepresentation(gson.toJson(policyCommands), MediaType.APPLICATION_JSON);
+        }
+
+            return result;
+        }
+
 
     private String processRedirectFlowCommand(PolicyCommand policyCommand) {
         logger.info("Processing REDIRECT_FLOW policyCommand: {}", policyCommand);
@@ -345,9 +340,8 @@ public class RestApiServer extends ServerResource {
         if (deviceNum > 1) {
             for (int i = 0; i < deviceNum - 1; i++) {
                 SecurityDevice deviceStart = policyCommand.getDevices().get(i);
-                SecurityDevice deviceEnd = policyCommand.getDevices()
-                        .get(i + 1);
-                List<DpidPortPair> path = computeRoute(
+                SecurityDevice deviceEnd = policyCommand.getDevices().get(i + 1);
+                List<DpidPortPair> path = scAgentDriver.computeRoute(
                         getAttachmentPoint(deviceStart
                                 .getOutgressAttachmentPointInfo()),
                         getAttachmentPoint(deviceEnd
@@ -379,20 +373,20 @@ public class RestApiServer extends ServerResource {
         // TODO:还可以根据IP+Vlan来确定源主机AP
         DpidPortPair sourceAP = null;
         AttachmentPointInfo sourceAPInfo = null;
-        if (!Arrays.equals(policyCommand.getMatch().getDataLayerSource(),
+        if (!Arrays.equals(policyCommand.getMatch().getDataLayerSourceBytes(),
                 new byte[]{0, 0, 0, 0, 0, 0})) {
             sourceAPInfo = new AttachmentPointInfo(policyCommand.getMatch()
-                    .getDataLayerSource(), null);
+                    .getDataLayerSourceBytes(), null);
             sourceAP = getAttachmentPoint(sourceAPInfo);
         }
 
         // TODO:还可以根据IP+Vlan来确定源主机AP
         DpidPortPair destinationAP = null;
         AttachmentPointInfo destinationAPInfo = null;
-        if (!Arrays.equals(policyCommand.getMatch().getDataLayerDestination(),
+        if (!Arrays.equals(policyCommand.getMatch().getDataLayerDestinationBytes(),
                 new byte[]{0, 0, 0, 0, 0, 0})) {
             destinationAPInfo = new AttachmentPointInfo(policyCommand
-                    .getMatch().getDataLayerDestination(), null);
+                    .getMatch().getDataLayerDestinationBytes(), null);
             destinationAP = getAttachmentPoint(destinationAPInfo);
         }
 
@@ -452,7 +446,7 @@ public class RestApiServer extends ServerResource {
                     logger.info(
                             "Prepare to delete a path, Computing a route form {} to {}",
                             startPoint, endPoint);
-                    List<DpidPortPair> path = computeRoute(startPoint, endPoint);
+                    List<DpidPortPair> path = scAgentDriver.computeRoute(startPoint, endPoint);
                     if (path == null || path.size() < 1) {
                         logger.error(
                                 "routeEngine cannot find a path from {} to {}",
@@ -522,9 +516,7 @@ public class RestApiServer extends ServerResource {
                 }
                 DpidPortPair endPoint = getAttachmentPoint(policyCommand
                         .getDevices().get(0).getIngressAttachmentPointInfo());
-                logger.info("Computing a route form {} to {}", startPoint,
-                        endPoint);
-                List<DpidPortPair> path = computeRoute(startPoint, endPoint);
+                List<DpidPortPair> path = scAgentDriver.computeRoute(startPoint, endPoint);
                 if (path == null || path.size() < 1) {
                     logger.error(
                             "routeEngine cannot find a path from {} to {}",
@@ -536,6 +528,12 @@ public class RestApiServer extends ServerResource {
                                     .toString());
                     return "cannot find  a path ";
                 }
+                //print path
+                String pathStr ="";
+                for (int i = 0; i < path.size(); i+=2) {
+                    pathStr += "" + path.get(i).getDpid() + ":" + path.get(i).getPort() +"->"+path.get(i+1).getDpid() + ":" + path.get(i+1).getPort()+"\n";
+                }
+                logger.info("path: \n{}",pathStr);
 
                 if (sourcePolicyCommandsWithoutInPort.containsKey(policyPrior
                         .getPolicyCommnd().getId())) { // 如果是源头且无IN端口
@@ -550,7 +548,7 @@ public class RestApiServer extends ServerResource {
                     }
                 } else {
                     MatchArguments match = policyCommand.getMatch();
-                    match.setInputPort((short) path.get(1).getPort());
+                    match.setInputPort((short) path.get(0).getPort());
                     FlowAction action = new FlowAction( path.get(1).getPort());
                     FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
                     String flowModId = scAgentDriver.sendFlowMod(path.get(0).getDpid(), match, action, settings);
@@ -561,7 +559,7 @@ public class RestApiServer extends ServerResource {
                 if (path.size() > 2) {
                     for (int i = 2; i < path.size() - 1; i += 2) {
                         MatchArguments match = policyCommand.getMatch();
-                        match.setInputPort((short) path.get(i+1).getPort());
+                        match.setInputPort((short) path.get(i).getPort());
                         FlowAction action = new FlowAction( path.get(i+1).getPort());
                         FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
                         String flowModId = scAgentDriver.sendFlowMod(path.get(i).getDpid(), match, action, settings);
@@ -605,29 +603,29 @@ public class RestApiServer extends ServerResource {
                     .getPolicyCommnd().getDevices().get(0)
                     .getIngressAttachmentPointInfo());
 
-            logger.info("Computing a route form {} to {}", startPoint, endPoint);
-            List<DpidPortPair> path = computeRoute(startPoint, endPoint);
+            List<DpidPortPair> path = scAgentDriver.computeRoute(startPoint, endPoint);
             if (path == null || path.size() < 1) {
-                logger.error("routeEngine cannot find a path from {} to {}",
-                        devicesOfPrePolicy.get(devicesOfPrePolicy.size() - 1)
-                                .getOutgressAttachmentPointInfo().toString(),
-                        policyCommand.getDevices().get(0)
-                                .getIngressAttachmentPointInfo().toString());
+                logger.error("routeEngine cannot find a path from {} to {}", startPoint.getDpid()+":"+startPoint.getPort(),endPoint.getDpid()+":"+endPoint.getPort() );
                 return "cannot find  a path ";
             }
+            //print path
+            String pathStr ="";
+            for (int i = 0; i < path.size(); i+=2) {
+                pathStr += "" + path.get(i).getDpid() + ":" + path.get(i).getPort() +"->"+path.get(i+1).getDpid() + ":" + path.get(i+1).getPort()+"\n";
+            }
+            logger.info("path: \n{}",pathStr);
+
             for (int i = 0; i < path.size() - 1; i += 2) {
-                match.setInputPort((short) path.get(1).getPort());
-                FlowAction action = new FlowAction( path.get(1).getPort());
+                match.setInputPort((short) path.get(i).getPort());
+                FlowAction action = new FlowAction( path.get(i+1).getPort());
                 FlowSettings settings = FlowSettings.loadFromPoliceCommand(policyCommand).setPriority(flowPriority);
-                String flowModId = scAgentDriver.sendFlowMod(path.get(0).getDpid(), match, action, settings);
+                String flowModId = scAgentDriver.sendFlowMod(path.get(i).getDpid(), match, action, settings);
 
                 if (flowModId != null) {
                     flowModMessageIds.add(flowModId);
                 }
             }
-            logger.info("" + match + ": " + policyCommand.getDevices() + " --"
-                    + flowPriority + "--> "
-                    + policyPosterior.getPolicyCommnd().getDevices());
+            logger.info(match + ": " + policyCommand.getDevices() + " --" + flowPriority + "--> " + policyPosterior.getPolicyCommnd().getDevices());
             policiesRelated.put(policyPosterior.getPolicyCommnd().getId(),
                     policyPosterior);
             flowPriority -= PolicyCommandDeployed.STEP;
@@ -646,15 +644,17 @@ public class RestApiServer extends ServerResource {
 
     private DpidPortPair getAttachmentPoint(AttachmentPointInfo attachmentPointInfo) {
         //TODO:
-        return null;
+        byte[] mac = attachmentPointInfo.getMac();
+        String toString = MACAddress.valueOf(mac).toString();
+        return  DeviceManager.getInstance().findHostByMac(toString);
+
     }
 
     public void addImplicitPolicyCommandDeployed(DpidPortPair sp,
                                                  AttachmentPointInfo apInfo, int priority, boolean setInPort) {
         String pcid;
         if (setInPort)
-            pcid = HexString.toHexString(sp.getDpid()) + "::"
-                    + sp.getPort();
+            pcid = HexString.toHexString(sp.getDpid()) + "::" + sp.getPort();
         else
             pcid = HexString.toHexString(sp.getDpid());
         String point;
@@ -671,30 +671,27 @@ public class RestApiServer extends ServerResource {
             with = "WITHOUT";
         }
         if (!policyCommandsDeployed.containsKey(pcid)) {
-            logger.info("Adding a origin " + point + " policy " + with
-                    + " in_Port and priority= {}", priority);
+            logger.info("Adding a origin " + point + " policy " + with + " in_Port and priority= {} on dpid:{}", priority,sp.getDpid());
             PolicyCommand policyCommandImplicit = new PolicyCommand();
             policyCommandImplicit.setId(pcid);
+            policyCommandImplicit.setType(PolicyActionType.REDIRECT_FLOW);
             policyCommandImplicit.setCommandPriority(priority);
             policyCommandImplicit.setIdleTimeout(DEFAULT_IDLE_TIMEOUT);
             policyCommandImplicit.setHardTimeout(DEFAULT_HARD_TIMEOUT);
             policyCommandImplicit.setMatch(new MatchArguments());
             SecurityDevice device = new SecurityDevice();
-            if (priority > 0)
+            if (priority > 0) {
                 device.setOutgressAttachmentPointInfo(apInfo);
-            else
+            } else {
                 device.setIngressAttachmentPointInfo(apInfo);
+            }
             ArrayList<SecurityDevice> devices = new ArrayList<SecurityDevice>();
             devices.add(device);
             policyCommandImplicit.setDevices(devices);
-            policyCommandsDeployed.put(pcid, new PolicyCommandDeployed(pcid,
-                    policyCommandImplicit,
-                    new HashMap<String, PolicyCommandRelated>()));
+            policyCommandsDeployed.put(pcid, new PolicyCommandDeployed(pcid, policyCommandImplicit, new HashMap<String, PolicyCommandRelated>()));
             if (priority > 0 && setInPort == false) {
-                logger.info("Adding an origin source policyCommand without inPort: "
-                        + pcid);
-                sourcePolicyCommandsWithoutInPort.put(pcid,
-                        policyCommandImplicit);
+                logger.info("Adding an origin source policyCommand without inPort: " + pcid);
+                sourcePolicyCommandsWithoutInPort.put(pcid, policyCommandImplicit);
             }
         }
     }

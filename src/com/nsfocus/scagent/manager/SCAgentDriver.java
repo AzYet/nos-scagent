@@ -23,15 +23,12 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Edge;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.ForwardingTable;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Trunk;
-import jp.co.nttdata.ofc.protocol.IProtocol;
 import jp.co.nttdata.ofc.protocol.packet.EthernetPDU;
 import jp.co.nttdata.ofc.protocol.packet.IPv4PDU;
 import jp.co.nttdata.ofc.protocol.packet.TcpPDU;
-import org.restlet.routing.Route;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -60,6 +57,7 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     @Override
     public List<DpidPortPair> computeRoute(DpidPortPair start, DpidPortPair end) {
+        logger.info("computing a route from {}:{} to {}:{}",start.getDpid(),start.getPort(),end.getDpid(),end.getPort());
         ArrayList<DpidPortPair> path = new ArrayList<DpidPortPair>();
         if(start.getDpid() == end.getDpid()){
             path.add(start);
@@ -191,20 +189,20 @@ public class SCAgentDriver implements ISCAgentDriver {
             wildcard_hints &= ~OFPConstant.OFWildCard.IN_PORT;
             flow.inPort = match.getInputPort();
         }
-        if (!Arrays.equals(match.getDataLayerSource(), new byte[] { 0, 0, 0, 0, 0, 0 })) {
+        if (!Arrays.equals(match.getDataLayerSourceBytes(), new byte[] { 0, 0, 0, 0, 0, 0 })) {
             wildcard_hints &= ~OFPConstant.OFWildCard.SRC_MACADDR;
             try {
-                flow.srcMacaddr = new MacAddress(match.getDataLayerSource());
+                flow.srcMacaddr = new MacAddress(match.getDataLayerSourceBytes());
             } catch (NosException e) {
                 // TODO Auto-generated catch block
                 e.printStackTrace();
             }
         }
-        if (!Arrays.equals(match.getDataLayerDestination(),
+        if (!Arrays.equals(match.getDataLayerDestinationBytes(),
                 new byte[] { 0, 0, 0, 0, 0, 0 })) {
             wildcard_hints &= ~OFPConstant.OFWildCard.DST_MACADDR;
             try {
-                flow.dstMacaddr = new MacAddress(match.getDataLayerDestination());
+                flow.dstMacaddr = new MacAddress(match.getDataLayerDestinationBytes());
             } catch (NosException e) {
                 // TODO Auto-generated catch block
                 e.printStackTrace();
@@ -490,7 +488,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             // pass all type of pi from authorized devices
             for (PolicyCommand p : RestApiServer.allowPolicies.values()) {
                 if (piDlSrc != null
-                        && MACAddress.valueOf(p.getMatch().getDataLayerSource())
+                        && MACAddress.valueOf(p.getMatch().getDataLayerSourceBytes())
                         .equals(MACAddress.valueOf(piDlSrc.toLong()))
                         ) {
                     return true;
@@ -595,7 +593,7 @@ public class SCAgentDriver implements ISCAgentDriver {
 //                        match1.setWildcards(match.getWildcards()
 //                                | OFMatch.OFPFW_DL_DST);
                         match1.wildCards |= OFPConstant.OFWildCard.DST_MACADDR;
-                        // match1.setDataLayerDestination(match.getDataLayerSource());
+                        // match1.setDataLayerDestination(match.getDataLayerSourceBytes());
                         match1.dstMacaddr = match
                                 .srcMacaddr;
                         match1.srcMacaddr = new MacAddress(byodCommand.getServerMac());
