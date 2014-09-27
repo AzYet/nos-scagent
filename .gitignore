@@ -18,3 +18,4 @@ thrift
 *.idea/*
 *.iml
 *.log
+*.sh

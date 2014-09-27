@@ -231,8 +231,8 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 			
 			DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
 			//PC_Chen
-			if(!macDpidPortMap.containsKey(srcMac.toString())){
-				macDpidPortMap.put(srcMac.toString(), p);
+			if(!macDpidPortMap.containsKey(srcMac.toString().toUpperCase())){
+				macDpidPortMap.put(srcMac.toString().toUpperCase(), p);
 			}
 
 			for(LogicalSwitch sw : topologyManager.getSwitchList()){
@@ -270,7 +270,7 @@ public class VirtualL2ServiceApplication implements INOSApplication{
 			ArrayList<String> toRem = new ArrayList<String>();
 			for(Entry<String, DpidPortPair> entry : map.entrySet()){
 				if(entry.getValue().getDpid() == dpid && entry.getValue().getPort() == portNo){
-					toRem.add(entry.getKey());
+					toRem.add(entry.getKey().toUpperCase());
 				}
 			}
 			for(String toRemItem : toRem){

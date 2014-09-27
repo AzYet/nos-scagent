@@ -22,6 +22,7 @@ import org.restlet.data.MediaType;
 import org.restlet.data.Protocol;
 import org.restlet.representation.Representation;
 import org.restlet.representation.StringRepresentation;
+import org.restlet.resource.Delete;
 import org.restlet.resource.Get;
 import org.restlet.resource.Post;
 import org.restlet.resource.ServerResource;
@@ -74,7 +75,7 @@ public class RestApiServer extends ServerResource {
             HashSet<PolicyCommand> res = new HashSet<PolicyCommand>();
             String type = form.getFirstValue("type");
             if (type == null) {
-                //TODO : return all policy Commands
+                //return all policy Commands
                 for (Map.Entry<String, PolicyCommandDeployed> pde : policyCommandsDeployed.entrySet()) {
                     PolicyCommand policyCommand = pde.getValue().getPolicyCommand();
                     if (!policyCommand.getId().startsWith("ByodInit_"))
@@ -112,63 +113,39 @@ public class RestApiServer extends ServerResource {
         return "{}";
     }
 
-	/*@Get("json")
-	public String handleGetRequest() {
-        ServerResource restApi = (ServerResource) getContext().getAttributes().get(this.getClass().getCanonicalName());
-        String type = (String) getRequestAttributes().get("op");
-		if (type != null) {
-			if(type.equals("device")){
-				Form form = getQuery();
-				String mac = form.getFirstValue("mac");
-				Gson gson = new Gson();
-				if (mac != null) {
-					DpidPortPair dpidPort = DeviceManager.getInstance()
-					.findHostByMac(mac);
-					return gson.toJson(dpidPort);
-				} else {
-					return gson.toJson(DeviceManager.getInstance()
-							.getMacDpidPortMap());
-				}
-			}else if (type.equalsIgnoreCase("route")){
-				Form form = getQuery();
-				String ends = form.getFirstValue("ends").toUpperCase();
-				if(ends !=null){
-					String[] split = ends.split("-");
-					if(split.length !=2){
-						return "{\"result\":\"param error\"}";
-					}
-					DpidPortPair start = DeviceManager.getInstance()
-					.findHostByMac(split[0]);
-					DpidPortPair end = DeviceManager.getInstance()
-					.findHostByMac(split[1]);
-					String res = "";
-					if(start == null){
-						res += " "+split[0]+" ";
-					}
-					if(end == null){
-						res = " "+split[1]+" ";
-					}
-					if(!res.equals("")){
-						return "{\"result\":\"can't find "+res+" \"}";
-					}
-                    List<DpidPortPair> path = SCAgentDriver.getInstance().computeRoute(start, end);
-                    return new Gson().toJson(path);
-				}else{
-					return "{\"result\":\"ends needed\"}";
-				}
+    @Delete
+    public String deletePolicyCommand() {
+        String id = (String) getRequestAttributes().get("id");
+        if (id == null)
+            return String.format("{\"status\" : \"error\", \"result\" : \"%s\"}", "param error");
 
-			}else if(type.equalsIgnoreCase("test")) {
-				return new Gson().toJson(TopologyManager.getInstance().getForwardingTable().getTable());
-//				return new Gson().toJson(TopologyManager.getInstance().getTrunkList());
-			}
-		}
-		return "{\"result\":\"error\"}";
-		// return "testValue ="+ ""
-		// +"\nResource URI  : " + getReference() + '\n' + "Root URI      : "
-		// + getRootRef() + '\n' + "Routed part   : "
-		// + getReference().getBaseRef() + '\n' + "Remaining part: "
-		// + getReference().getRemainingPart();
-	}*/
+        PolicyCommandDeployed pd = policyCommandsDeployed.get(id);
+        if (pd != null) {
+            List<PolicyCommand> list = new ArrayList<PolicyCommand>();
+            PolicyCommand p = pd.getPolicyCommand();
+            if (p.getType() == PolicyActionType.BYOD_ALLOW) {
+                removeFromAllowPolicies(p.getId());
+            }
+            list.add(p);
+            scAgentDriver.handleRestoreCommands(p.getType(), list);
+            return String.format("{\"status\" : \"ok\", \"result\" : \"%s\"}", p.getId());
+        }
+        //see if it's a byod_init command
+        List<PolicyCommand> list = new ArrayList<PolicyCommand>();
+        for (int i = 0; i < 6; i++) {
+            String initCommandId = String.format("ByodInit_%d_%s", i, id);
+            PolicyCommandDeployed initCommand = policyCommandsDeployed.get(initCommandId);
+            if (initCommand != null) {
+                list.add(initCommand.getPolicyCommand());
+            }
+        }
+        if (!list.isEmpty()) {
+            scAgentDriver.handleRestoreCommands(PolicyActionType.ALLOW_FLOW, list);
+            BYODRedirectCommand byodRedirectCommand = redirectCommands.remove(id);
+            return String.format("{\"status\" : \"ok\", \"result\" : \"%s\"}", byodRedirectCommand.getId());
+        }
+        return String.format("{\"status\" : \"error\", \"result\" : \"%s\"}", "no such policy");
+    }
 
 	@Post
 	public Representation handlePostRequest(Representation entity) {
@@ -195,7 +172,7 @@ public class RestApiServer extends ServerResource {
                 String mac = stringJsonElementEntry.getKey();
                 long dpid = swPort.get("dpid").getAsLong();
                 int port = swPort.get("port").getAsInt();
-                dpidPortPairHashMap.put(mac, new DpidPortPair(dpid, port));
+                dpidPortPairHashMap.put(mac.toUpperCase(), new DpidPortPair(dpid, port));
             }
             return new StringRepresentation(gson.toJson(dpidPortPairHashMap), MediaType.APPLICATION_JSON);
         } else if (op.equalsIgnoreCase("test")) {
@@ -231,8 +208,7 @@ public class RestApiServer extends ServerResource {
                     // add redirect rules to Packet_In handler
                     BYODRedirectCommand addInitRes = addPacketInRedirect((BYODRedirectCommand) policyCommand);
                     if (addInitRes != null) {
-                        res += "add policy with the same id "
-                                + policyCommand.getId() + " exists, abort.";
+                        res += "policy id " + policyCommand.getId() + " exists, abort.";
                         resStr += policyCommand.getId() + ": exists";
                         status = "error";
                         continue;
@@ -246,6 +222,9 @@ public class RestApiServer extends ServerResource {
                     resStr += policyCommand.getPolicyName() + ": " + s + ",";
                     if (s == null) {
                         status = "error";
+                    } else {
+                        policyCommandsDeployed.put(policyCommand.getId(),new PolicyCommandDeployed(policyCommand.getId(),policyCommand,
+                                new HashMap<String,PolicyCommandRelated>(),new ArrayList<String>(Arrays.asList(s))));
                     }
                 }
                 //start a thread to maitain the byod flows
@@ -258,10 +237,8 @@ public class RestApiServer extends ServerResource {
                 String resStr = "";
                 String status = "ok";
                 for (final PolicyCommand policyCommand : policyCommands) {
-                    PolicyCommand addpolicyRes = addToAllowPolicies(policyCommand);
-                    if (addpolicyRes != null) {
-                        res += "add policy with the same id "
-                                + policyCommand.getId() + " exists, abort.";
+                    if (allowPolicies.containsKey(policyCommand.getId())) {
+                        res += "add policy with the same id " + policyCommand.getId() + " exists, abort.";
                         resStr += policyCommand.getId() + ": exists";
                         status = "error";
                         continue;
@@ -279,10 +256,14 @@ public class RestApiServer extends ServerResource {
                         resStr += policyCommand.getId() + ": " + flowModId;
                         if (flowModId == null) {
                             status = "error";
+                        } else {
+                            addToAllowPolicies(policyCommand);
+                            policyCommandsDeployed.put(policyCommand.getId(), new PolicyCommandDeployed(policyCommand.getId(), policyCommand,
+                                    new HashMap<String, PolicyCommandRelated>(), new ArrayList<String>(Arrays.asList(flowModId))));
                         }
                     } else {
                         status = "error";
-                        logger.warn("cannot find sw: {}, abort!", policyCommand.getDpid());
+                        logger.warn("wrong dpid: {}", policyCommand.getDpid());
                     }
                     if (policyCommand.getHardTimeout() != 0) {
                         final PolicyCommand restorePolicy = new PolicyCommand(
@@ -291,15 +272,9 @@ public class RestApiServer extends ServerResource {
                                 policyCommand.getHardTimeout());
                         ScheduledExecutorService scheduledExecutor = Executors.newScheduledThreadPool(1);
 
-                        final List<PolicyCommand> restoreCommands = new ArrayList<PolicyCommand>() {
-                            private static final long serialVersionUID = 1L;
-
-                            {
-                                add(restorePolicy);
-                            }
-                        };
+                        final List<PolicyCommand> restoreCommands = new ArrayList<PolicyCommand>();
+                        restoreCommands.add(restorePolicy);
                         scheduledExecutor.schedule(new Runnable() {
-
                             @Override
                             public void run() {
                                 scAgentDriver.deletePolicies(restorePolicy.getType(),
@@ -307,7 +282,6 @@ public class RestApiServer extends ServerResource {
                                 removeFromAllowPolicies(policyCommand
                                         .getId());
                             }
-
                         }, policyCommand.getHardTimeout(), TimeUnit.SECONDS);
                     }
                 }
@@ -318,9 +292,8 @@ public class RestApiServer extends ServerResource {
             }
             result = new StringRepresentation(gson.toJson(policyCommands), MediaType.APPLICATION_JSON);
         }
-
-            return result;
-        }
+        return result;
+    }
 
 
     private String processRedirectFlowCommand(PolicyCommand policyCommand) {
@@ -463,15 +436,15 @@ public class RestApiServer extends ServerResource {
                             .containsKey(policyPrior.getPolicyCommnd().getId())) { // 如果是源头且无IN端口
                         logger.info("Start AP={} is an origin SOURCE",
                                 path.get(0));
-                        removeFlowEntry(policyCommand, null, flowPriority,
+                        scAgentDriver.removeFlowEntry(policyCommand, null, flowPriority,
                                 path.get(0), path.get(1), false);
                     } else {
-                        removeFlowEntry(policyCommand, null, flowPriority,
+                        scAgentDriver.removeFlowEntry(policyCommand, null, flowPriority,
                                 path.get(0), path.get(1), true);
                     }
                     if (path.size() > 2) {
                         for (int i = 2; i < path.size() - 1; i += 2) {
-                            removeFlowEntry(policyCommand, null, flowPriority,
+                            scAgentDriver.removeFlowEntry(policyCommand, null, flowPriority,
                                     path.get(i), path.get(i + 1), true);
                         }
                     }
@@ -630,6 +603,7 @@ public class RestApiServer extends ServerResource {
                     policyPosterior);
             flowPriority -= PolicyCommandDeployed.STEP;
         }
+        
         policyCommandsDeployed.put(policyCommand.getId(),
                 new PolicyCommandDeployed(policyCommand.getId(), policyCommand,
                         policiesRelated, flowModMessageIds));
@@ -638,9 +612,7 @@ public class RestApiServer extends ServerResource {
     }
 
 
-    private void removeFlowEntry(PolicyCommand policyCommand, Object o, short flowPriority, DpidPortPair dpidPortPair, DpidPortPair dpidPortPair1, boolean b) {
-        //TODO
-    }
+
 
     private DpidPortPair getAttachmentPoint(AttachmentPointInfo attachmentPointInfo) {
         //TODO:

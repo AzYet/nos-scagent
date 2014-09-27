@@ -19,7 +19,7 @@ public class FlowSettings {
 
     int bufferId;
 
-    short outPort;
+    int outPort;
 
     public FlowSettings() {
         super();
@@ -48,11 +48,11 @@ public class FlowSettings {
         return this;
     }
 
-    public short getOutPort() {
+    public int getOutPort() {
         return outPort;
     }
 
-    public FlowSettings setOutPort(short outPort) {
+    public FlowSettings setOutPort(int outPort) {
         this.outPort = outPort;
         return this;
     }

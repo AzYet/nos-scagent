@@ -254,8 +254,8 @@ public class SCAgentApplication implements INOSApplication{
 
             DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
             //PC_Chen
-            if (!macDpidPortMap.containsKey(srcMac.toString())) {
-                macDpidPortMap.put(srcMac.toString(), p);
+            if (!macDpidPortMap.containsKey(srcMac.toString().toUpperCase())) {
+                macDpidPortMap.put(srcMac.toString().toUpperCase(), p);
             }
 
             scAgentDriver.handleIncomingPackets(nosApi, packetIn);
@@ -269,7 +269,7 @@ public class SCAgentApplication implements INOSApplication{
             System.out.println("No switch is matched, " + packetIn.dpid + "/" + packetIn.inPort);
         }
         }catch(Exception e){
-			System.err.println("Error during packet in....");
+			System.err.println("Error during packet in...." + e.getClass().getCanonicalName());
 			e.printStackTrace();
 		}
 		
@@ -288,6 +288,7 @@ public class SCAgentApplication implements INOSApplication{
 			PortStatusEventVO portStatus) {
 		// TODO 自動生成されたメソッド・スタブ
 		System.out.println("port status changing");
+        //PC_Chen : port down
 		if(portStatus.reason ==2 && portStatus.physiPort.portStatus == 1){
 			long dpid =portStatus.dpid;
 			int portNo = portStatus.physiPort.portNo;
@@ -295,7 +296,7 @@ public class SCAgentApplication implements INOSApplication{
 			ArrayList<String> toRem = new ArrayList<String>();
 			for(Entry<String, DpidPortPair> entry : map.entrySet()){
 				if(entry.getValue().getDpid() == dpid && entry.getValue().getPort() == portNo){
-					toRem.add(entry.getKey());
+					toRem.add(entry.getKey().toUpperCase());
 				}
 			}
 			for(String toRemItem : toRem){

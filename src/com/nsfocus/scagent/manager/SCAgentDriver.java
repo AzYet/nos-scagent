@@ -29,6 +29,7 @@ import jp.co.nttdata.ofc.protocol.packet.TcpPDU;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -121,7 +122,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             return;
         if(action.getOutput()!=null && action.getOutput().size()>0) {
             for (int o : action.getOutput()) {
-                flowModifier.addOutputAction(o, 0);
+                flowModifier.addOutputAction(o,65535);
             }
         }
         if (!Arrays.equals(new byte[6], action.getDlSrc())) {
@@ -415,9 +416,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             ports.add(OFPConstant.OFPort.CONTROLLER);
             action.setOutput(ports);
         }
-        String ret = sendFlowMod(tgtSw, policyCommand.getMatch(), action, settings);
-        return ret;
-
+        return sendFlowMod(tgtSw, policyCommand.getMatch(), action, settings);
     }
 
     public String deletePolicies(PolicyActionType type, List<PolicyCommand> policyCommands) {
@@ -445,9 +444,30 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     }
 
-    private String removeFlowEntry(String fmid) {
-        //TODO:
-        return null;
+    private int removeFlowEntry(String flowModMessageId) {
+        SwitchFlowModCount sfmc = RestApiServer.globalFlowModCountMap.get(flowModMessageId);
+        if (sfmc == null) {
+            logger.info("no such flow exists : {}", flowModMessageId);
+            return -1;
+        }
+        int count;
+        if ((count = sfmc.decreaseCount()) > 0) {
+            return count;
+        }
+        long sw = sfmc.getDpid();
+        FlowMod flowModMessage = sfmc.getFlowModMessage();
+        flowModMessage.getSettings().setCommand(FlowMod.FMCommand.DELETE_STRICT);
+        if (flowModMessage.getActions() != null && flowModMessage.getActions().getOutput() != null && flowModMessage.getActions().getOutput().size() > 0) {
+            Integer out = flowModMessage.getActions().getOutput().get(0);
+            flowModMessage.getSettings().setOutPort(out);
+        }
+        sendFlowMod(sw, flowModMessage);
+        SwitchFlowModCount removed = RestApiServer.globalFlowModCountMap
+                .remove(flowModMessageId);
+        Map<String, SwitchFlowModCount> sMap = RestApiServer.switchFlowModCountMap
+                .get(removed.getDpid());
+        sMap.remove(flowModMessageId);
+        return count;
     }
 
     /***
@@ -531,10 +551,16 @@ public class SCAgentDriver implements ISCAgentDriver {
                                         HexString.toHexString(packetIn.dpid, 8)});
                         match.extractFlowInfo(eth,packetIn.inPort);
 //                        match.loadFromPacket(pi.getPacketData(), pi.getInPort());
-                        match.wildCards |= OFPConstant.OFWildCard.DST_MACADDR;
+                        match.wildCards =OFPConstant.OFWildCard.ALL
+                                &~OFPConstant.OFWildCard.SRC_MACADDR
+                                &~OFPConstant.OFWildCard.DST_MACADDR
+                                & ~OFPConstant.OFWildCard.SRC_MASK
+                                &~OFPConstant.OFWildCard.DST_MASK &~OFPConstant.OFWildCard.ETHER_TYPE
+                                &~OFPConstant.OFWildCard.NW_PROTO &~OFPConstant.OFWildCard.DST_PORT
+                                &~OFPConstant.OFWildCard.SRC_PORT;
 
                         DpidPortPair dpidPortPair = DeviceManager.getInstance().findHostByMac(byodCommand
-                                .getServerMac());
+                                .getServerMac().toUpperCase());
                         DpidPortPair svrAp = null;
                         if (dpidPortPair != null) {
                             svrAp = dpidPortPair;
@@ -562,8 +588,8 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
                                 flowModifier.addOutputAction(path.get(j+1).getPort(),0);
                                 flowModifier.setFlags(1);
-                                flowModifier.setHardTimeoutSec(5);
-                                flowModifier.setIdleTimeoutSec(0);
+                                flowModifier.setHardTimeoutSec(0);
+                                flowModifier.setIdleTimeoutSec(500);
                                 flowModifier.setCookie(cookie);
                                 flowModifier.setAddCommand();
                                 flowModifier.setPriority(byodCommand.getCommandPriority());
@@ -576,7 +602,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 flowModifier.addOutputAction(path.get(j+1).getPort(),0);
                                 flowModifier.setFlags(1);
                                 flowModifier.setHardTimeoutSec(0);
-                                flowModifier.setIdleTimeoutSec(5);
+                                flowModifier.setIdleTimeoutSec(500);
                                 flowModifier.setCookie(cookie);
                                 flowModifier.setAddCommand();
                                 flowModifier.setPriority(byodCommand.getCommandPriority());
@@ -614,7 +640,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 modifier1.setAddCommand();
                                 modifier1.setBufferId(FlowMod.NONE_BUFFER_ID);
                                 modifier1.setPriority(byodCommand.getCommandPriority());
-                                modifier1.setIdleTimeoutSec(5);
+                                modifier1.setIdleTimeoutSec(500);
                                 modifier1.setHardTimeoutSec(0);
                                 modifier1.setFlags(1);
                                 modifier1.setCookie(cookie);
@@ -623,11 +649,11 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 modifier1.send();
 
                             } else {
-                                IFlowModifier modifier2 = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match2);
+                                IFlowModifier modifier2 = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match1);
                                 modifier2.setAddCommand();
                                 modifier2.setBufferId(FlowMod.NONE_BUFFER_ID);
                                 modifier2.setPriority(byodCommand.getCommandPriority());
-                                modifier2.setIdleTimeoutSec(5);
+                                modifier2.setIdleTimeoutSec(500);
                                 modifier2.setHardTimeoutSec(0);
                                 modifier2.setFlags(1);
                                 modifier2.setCookie(cookie);
@@ -655,7 +681,68 @@ public class SCAgentDriver implements ISCAgentDriver {
             }
         }
         return res;
-
-
     }
+
+    public void removeFlowEntry(PolicyCommand policyCommand, MatchArguments matchSpecified, short flowPriority, DpidPortPair previousAttachPoint, DpidPortPair nextAttachPoint, boolean setInPort) {
+        logger.info("Generating a FLOW_MOD Message from " + previousAttachPoint
+                + " to " + nextAttachPoint + " with Match = "
+                + policyCommand.getMatch() + " and setInPort = " + setInPort);
+
+        if (previousAttachPoint.getDpid() != nextAttachPoint.getDpid()) {
+            logger.error("error : src port and dst port not on the same bridge!");
+            return;
+        }
+        long sw = previousAttachPoint.getDpid();
+        Flow match;
+        if (matchSpecified == null)
+            match = createFlowFromMatch(policyCommand.getMatch());
+        else
+            match = createFlowFromMatch(matchSpecified);
+        // check if need match in_port
+        if (setInPort) {
+            match.wildCards &= ~OFPConstant.OFWildCard.IN_PORT;
+            match.inPort = previousAttachPoint.getPort();
+        }
+
+        IFlowModifier fm = null;
+        try {
+            fm = nosApi.createFlowModifierInstance(previousAttachPoint.getDpid(), match);
+            loadFMSettings(fm, policyCommand.createFlowSettings());
+            fm.setOutPort(nextAttachPoint.getPort());
+            fm.setDeleteStrictCommand();
+            fm.send();
+        } catch (OFSwitchNotFoundException e) {
+            logger.warn("Create flowMod error. policy id: {}",policyCommand.getId());
+            e.printStackTrace();
+        } catch (NosSocketIOException e) {
+            logger.warn("delete flow error. dpid: {}, match: {}",policyCommand.getDpid(),match);
+            e.printStackTrace();
+        }
+    }
+
+    public String handleRestoreCommands(PolicyActionType type,
+                                        List<? extends PolicyCommand> policyCommands) {
+        logger.info("Start to handle " + type + " policyCommands");
+        for (PolicyCommand policyCommand : policyCommands) {
+            List<String> flowModIdList = RestApiServer.policyCommandsDeployed.get(
+                    policyCommand.getId()).getFlowModIdList();
+            for (String fmid : flowModIdList) {
+                SwitchFlowModCount switchFlowModCount = RestApiServer.globalFlowModCountMap
+                        .get(fmid);
+                if (switchFlowModCount != null) {
+                    int remainCount = switchFlowModCount.decreaseCount();
+                    if (remainCount == 0) {
+                        removeFlowEntry(fmid);
+                    }
+                }
+            }
+            RestApiServer.policyCommandsDeployed.remove(policyCommand.getId());
+            // still need to remove entry from authorizedMacs
+            if (type == PolicyActionType.RESTORE_BYOD_ALLOW) {
+                RestApiServer.removeFromAllowPolicies(policyCommand.getId());
+            }
+        }
+        return type.toString();
+    }
+
 }

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<project default="create_run_jar" name="Create Runnable Jar for Project VncController">
+    <!--this file was created by Eclipse Runnable JAR Export Wizard-->
+    <!--ANT 1.7 is required                                        -->
+    <target name="create_run_jar">
+        <jar destfile="/home/chen/nos.jar" filesetmanifest="mergewithoutmain">
+            <manifest>
+                <attribute name="Main-Class" value="jp.co.nttdata.ofc.main.OpenFlowControllerMain"/>
+                <attribute name="Class-Path" value="."/>
+            </manifest>
+            <fileset dir="/home/chen/workspace3/VncController/bin"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/VncController/lib/log4j-1.2.17.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/VncController/lib/nos.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/VncController/lib/nosapi.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/workspace3/VncController/lib/org.restlet-2.1.7.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/workspace3/VncController/lib/gson-2.3.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/workspace3/VncController/lib/args4j-2.0.21.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/workspace3/VncController/lib/log4j-1.2.17.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/workspace3/VncController/lib/slf4j-api-1.7.5.jar"/>
+            <zipfileset excludes="META-INF/*.SF" src="/home/chen/workspace3/VncController/lib/slf4j-log4j12-1.7.5.jar"/>
+        </jar>
+    </target>
+</project>

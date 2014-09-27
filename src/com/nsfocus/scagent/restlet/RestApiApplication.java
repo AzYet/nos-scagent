@@ -11,7 +11,7 @@ public class RestApiApplication extends Application{
     public Restlet createInboundRoot() {
         Router router = new Router(this.getContext());
         router.attach("/scagent/{op}", RestApiServer.class);
-        
-        return router;    
+        router.attach("/scagent/policyaction/{id}", RestApiServer.class);
+        return router;
     }
 }
