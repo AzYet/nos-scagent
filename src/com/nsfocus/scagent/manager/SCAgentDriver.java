@@ -19,6 +19,7 @@ import jp.co.nttdata.ofc.nos.api.vo.event.PacketInEventVO;
 import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nos.ofp.common.Flow;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
+import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.logical.LogicalSwitch;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Edge;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.ForwardingTable;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
@@ -55,6 +56,18 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     }
 
+    public List<DpidPortPair> dijkstra(DpidPortPair start, DpidPortPair end) {
+        Map<String,List<String>> routeMap = new HashMap<String, List<String>>();
+        TopologyManager topologyManager = TopologyManager.getInstance();
+        LinkedList<Long> Udpids = new LinkedList<Long>();
+        for (LogicalSwitch logicalSwitch : topologyManager.getSwitchList()) {
+            if (logicalSwitch.getDpid() == start.getDpid()) {
+                continue;
+            }
+        }
+
+        return null;
+    }
 
     @Override
     public List<DpidPortPair> computeRoute(DpidPortPair start, DpidPortPair end) {

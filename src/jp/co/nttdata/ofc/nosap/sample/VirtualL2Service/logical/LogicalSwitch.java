@@ -42,7 +42,12 @@ public class LogicalSwitch {
 	public static final int DEFAULT_IDLE_TIMEOUT = 60 * 60;	// sec
 
 	private String name;
-	private long dpid;//added by liuwenmao
+
+    public long getDpid() {
+        return dpid;
+    }
+
+    private long dpid;//added by liuwenmao
 	private CopyOnWriteArrayList<DpidPortPair> dppl;
 	private Hashtable<MacAddress, DpidPortPair> macTable;
 
@@ -201,7 +206,6 @@ public class LogicalSwitch {
                 logger.info("ignore a multicast unicast pkt, {}-{} srcMac="+ packetIn.flow.srcMacaddr +
                         " dstMac=" + packetIn.flow.dstMacaddr+" "+packetIn.flow.etherType ,packetIn.dpid,packetIn.inPort);
                 return;
-
             }
             this.removeMac(srcMac);
 
