@@ -30,7 +30,6 @@ import jp.co.nttdata.ofc.protocol.packet.TcpPDU;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -45,7 +44,7 @@ public class SCAgentDriver implements ISCAgentDriver {
     private static SCAgentDriver scAgentDriver = new SCAgentDriver();
 
 
-    public static SCAgentDriver getInstance(){
+    public static SCAgentDriver getInstance() {
         return scAgentDriver;
     }
 
@@ -57,61 +56,112 @@ public class SCAgentDriver implements ISCAgentDriver {
     }
 
     public List<DpidPortPair> dijkstra(DpidPortPair start, DpidPortPair end) {
-        Map<String,List<String>> routeMap = new HashMap<String, List<String>>();
-        TopologyManager topologyManager = TopologyManager.getInstance();
-        LinkedList<Long> Udpids = new LinkedList<Long>();
-        for (LogicalSwitch logicalSwitch : topologyManager.getSwitchList()) {
-            if (logicalSwitch.getDpid() == start.getDpid()) {
-                continue;
+        class Route {
+            Route(Long target, int dist, List<Trunk> path) {
+                this.target = target;
+                this.dist = dist;
+                if (path != null)
+                    this.path = path;
             }
+            Long target;
+            int dist;
+            List<Trunk> path = new LinkedList<Trunk>();
+        }
+
+        TopologyManager topologyManager = TopologyManager.getInstance();
+        CopyOnWriteArrayList<Trunk> trunkList = topologyManager.getTrunkList();
+        // <target:{dist,path}>
+        Map<Long, Route> routeMap = new HashMap<Long, Route>();
+        List<Long> resList = new LinkedList<Long>();
+        routeMap.put(start.getDpid(), new Route(start.getDpid(), 0, null));
+        LinkedList<Long> uDpids = new LinkedList<Long>();
+        LinkedList<Long> sDpids = new LinkedList<Long>();
+        sDpids.add(start.getDpid());
+        for (LogicalSwitch logicalSwitch : topologyManager.getSwitchList()) {
+            if (start.getDpid() != logicalSwitch.getDpid()) {
+                uDpids.add(logicalSwitch.getDpid());
+                routeMap.put(logicalSwitch.getDpid(),
+                        new Route(logicalSwitch.getDpid(), Integer.MAX_VALUE, null));
+            }
+        }
+        Long cPoint = start.getDpid();
+        while (!uDpids.isEmpty()) {
+            Route minDist = new Route(0L, Integer.MAX_VALUE, null);
+            for (Long uDpid : uDpids) {
+                long ltr = uDpid < cPoint ? uDpid : cPoint;
+                long gtr = uDpid > cPoint ? uDpid : cPoint;
+                for (Trunk trunk : trunkList) {//for every target
+                    if (trunk.getDpidPair()[0] == ltr && trunk.getDpidPair()[1] == gtr) { // is neighbour
+                        int dist = routeMap.get(uDpid).dist + 1;    //calculate new dist
+                        if (dist < minDist.dist) {
+                            List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
+                            trunks.add(trunk);
+                            minDist = new Route(uDpid, dist, trunks);
+                        }
+                        if (dist < routeMap.get(uDpid).dist) {
+                            List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
+                            trunks.add(trunk);
+                            routeMap.get(uDpid).dist = dist;
+                            routeMap.get(uDpid).path = trunks;
+                        }
+                    }
+                }
+            }
+            resList.add(minDist.target);
+            uDpids.remove(minDist.target);
+            cPoint = minDist.target;
         }
 
         return null;
     }
 
+    private Long extraceMinDist(List<Trunk> trunkList, List<Long> uDpids, Long src) {
+        return null;
+    }
+
     @Override
     public List<DpidPortPair> computeRoute(DpidPortPair start, DpidPortPair end) {
-        logger.info("computing a route from {}:{} to {}:{}",start.getDpid(),start.getPort(),end.getDpid(),end.getPort());
+        logger.info("computing a route from {}:{} to {}:{}", start.getDpid(), start.getPort(), end.getDpid(), end.getPort());
         ArrayList<DpidPortPair> path = new ArrayList<DpidPortPair>();
-        if(start.getDpid() == end.getDpid()){
+        if (start.getDpid() == end.getDpid()) {
             path.add(start);
             path.add(end);
             return path;
         }
         ForwardingTable forwardingTable = TopologyManager.getInstance().getForwardingTable();
         CopyOnWriteArrayList<Trunk> trunkList = TopologyManager.getInstance().getTrunkList();
-        boolean proceed =true;
+        boolean proceed = true;
         DpidPortPair currentPair = start;
-        while(proceed) {
+        while (proceed) {
             boolean noPath = true;
             path.add(currentPair);
-            for ( ForwardingTable.ForwardingTableEntry entry : forwardingTable.getTable()){
-                if(entry.getKey()[0]==currentPair.getDpid() && entry.getKey()[1] == end.getDpid()){
+            for (ForwardingTable.ForwardingTableEntry entry : forwardingTable.getTable()) {
+                if (entry.getKey()[0] == currentPair.getDpid() && entry.getKey()[1] == end.getDpid()) {
                     noPath = false;
                     Integer portForward = entry.getPortList().get(0);
                     Long dpid = currentPair.getDpid();
-                    path.add(new DpidPortPair(dpid,portForward));
+                    path.add(new DpidPortPair(dpid, portForward));
                     //find which dpid portForward links to'
-                    for(Trunk trunk : trunkList){
-                        if(trunk.getDpidPair()[0] == dpid ){
-                            for(Edge edge : trunk.getEdgeList()){
-                                if(edge.getPorts()[0] == portForward ){
+                    for (Trunk trunk : trunkList) {
+                        if (trunk.getDpidPair()[0] == dpid) {
+                            for (Edge edge : trunk.getEdgeList()) {
+                                if (edge.getPorts()[0] == portForward) {
                                     Long nextDpid = trunk.getDpidPair()[1];
                                     int nextPort = edge.getPorts()[1];
-                                    currentPair = new DpidPortPair(nextDpid,nextPort);
-                                    if(nextDpid == end.getDpid()){
-                                        proceed =false;
+                                    currentPair = new DpidPortPair(nextDpid, nextPort);
+                                    if (nextDpid == end.getDpid()) {
+                                        proceed = false;
                                     }
                                 }
                             }
-                        }else if(trunk.getDpidPair()[1] == dpid ){
-                            for(Edge edge : trunk.getEdgeList()){
-                                if(edge.getPorts()[1] == portForward ){
+                        } else if (trunk.getDpidPair()[1] == dpid) {
+                            for (Edge edge : trunk.getEdgeList()) {
+                                if (edge.getPorts()[1] == portForward) {
                                     Long nextDpid = trunk.getDpidPair()[0];
                                     int nextPort = edge.getPorts()[0];
-                                    currentPair = new DpidPortPair(nextDpid,nextPort);
-                                    if(nextDpid == end.getDpid()){
-                                        proceed =false;
+                                    currentPair = new DpidPortPair(nextDpid, nextPort);
+                                    if (nextDpid == end.getDpid()) {
+                                        proceed = false;
                                     }
                                 }
                             }
@@ -120,7 +170,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                     break;
                 }
             }
-            if(noPath){
+            if (noPath) {
                 return null;
             }
         }
@@ -131,11 +181,11 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     public static void loadFMAction(IFlowModifier flowModifier, FlowAction action)
             throws ActionNotSupportedException, OFSwitchNotFoundException, ArgumentInvalidException, SwitchPortNotFoundException {
-        if(action == null)
+        if (action == null)
             return;
-        if(action.getOutput()!=null && action.getOutput().size()>0) {
+        if (action.getOutput() != null && action.getOutput().size() > 0) {
             for (int o : action.getOutput()) {
-                flowModifier.addOutputAction(o,65535);
+                flowModifier.addOutputAction(o, 65535);
             }
         }
         if (!Arrays.equals(new byte[6], action.getDlSrc())) {
@@ -162,15 +212,15 @@ public class SCAgentDriver implements ISCAgentDriver {
         flowModifier.setOutPort(settings.getOutPort());
         if (settings.getCommand() == FlowMod.FMCommand.ADD) {
             flowModifier.setAddCommand();
-        }else if (settings.getCommand() == FlowMod.FMCommand.DELETE) {
+        } else if (settings.getCommand() == FlowMod.FMCommand.DELETE) {
             flowModifier.setDeleteCommand();
-        }else if (settings.getCommand() == FlowMod.FMCommand.DELETE_STRICT) {
+        } else if (settings.getCommand() == FlowMod.FMCommand.DELETE_STRICT) {
             flowModifier.setDeleteStrictCommand();
-        }else if (settings.getCommand() == FlowMod.FMCommand.MODIFY) {
+        } else if (settings.getCommand() == FlowMod.FMCommand.MODIFY) {
             flowModifier.setModifyCommand();
-        }else if (settings.getCommand() == FlowMod.FMCommand.MODIFY_STRICT) {
+        } else if (settings.getCommand() == FlowMod.FMCommand.MODIFY_STRICT) {
             flowModifier.setModifyStrictCommand();
-        }else{      //default to add command
+        } else {      //default to add command
             flowModifier.setAddCommand();
         }
         flowModifier.setHardTimeoutSec(settings.getHardTimeout());
@@ -182,18 +232,17 @@ public class SCAgentDriver implements ISCAgentDriver {
         short res = 0;
         for (FlowMod.FMFlag flag : flags) {
             if (flag == FlowMod.FMFlag.SEND_FLOW_REM) {
-                res |=1;
-            }else if (flag == FlowMod.FMFlag.CHECK_OVERLAP) {
-                res |= 1<<1;
-            }else if (flag == FlowMod.FMFlag.EMERG) {
-                res |= 1<<2;
+                res |= 1;
+            } else if (flag == FlowMod.FMFlag.CHECK_OVERLAP) {
+                res |= 1 << 1;
+            } else if (flag == FlowMod.FMFlag.EMERG) {
+                res |= 1 << 2;
             }
         }
         return res;
     }
 
     /**
-     *
      * @return an OFMatch object without in_port
      */
     public Flow createFlowFromMatch(MatchArguments match) {
@@ -203,7 +252,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             wildcard_hints &= ~OFPConstant.OFWildCard.IN_PORT;
             flow.inPort = match.getInputPort();
         }
-        if (!Arrays.equals(match.getDataLayerSourceBytes(), new byte[] { 0, 0, 0, 0, 0, 0 })) {
+        if (!Arrays.equals(match.getDataLayerSourceBytes(), new byte[]{0, 0, 0, 0, 0, 0})) {
             wildcard_hints &= ~OFPConstant.OFWildCard.SRC_MACADDR;
             try {
                 flow.srcMacaddr = new MacAddress(match.getDataLayerSourceBytes());
@@ -213,7 +262,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             }
         }
         if (!Arrays.equals(match.getDataLayerDestinationBytes(),
-                new byte[] { 0, 0, 0, 0, 0, 0 })) {
+                new byte[]{0, 0, 0, 0, 0, 0})) {
             wildcard_hints &= ~OFPConstant.OFWildCard.DST_MACADDR;
             try {
                 flow.dstMacaddr = new MacAddress(match.getDataLayerDestinationBytes());
@@ -253,7 +302,7 @@ public class SCAgentDriver implements ISCAgentDriver {
         }
         if (match.getNetworkProtocol() != 0) {
             wildcard_hints &= ~OFPConstant.OFWildCard.NW_PROTO;//Match.OFPFW_NW_PROTO;
-            flow.proto=(match.getNetworkProtocol());
+            flow.proto = (match.getNetworkProtocol());
         }
         if (match.getNetworkTypeOfService() != 0) {
             wildcard_hints &= ~OFPConstant.OFWildCard.TOS;//Match.OFPFW_NW_TOS;
@@ -297,7 +346,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             long res = flowModifier.send();
 
 
-            flowModId = Cypher.getMD5(new String[]{dpid+"",
+            flowModId = Cypher.getMD5(new String[]{dpid + "",
                     flowMod.toString()});
             // add to corresponding map
             Map<String, SwitchFlowModCount> sMap = RestApiServer.switchFlowModCountMap.get(dpid);
@@ -331,7 +380,7 @@ public class SCAgentDriver implements ISCAgentDriver {
     @Override
     public String sendFlowMod(Long dpid, MatchArguments match, FlowAction actions, FlowSettings settings) {
         FlowMod flowMod = new FlowMod(match, actions, settings);
-        return sendFlowMod(dpid,flowMod);
+        return sendFlowMod(dpid, flowMod);
     }
 
     public String sendFlowMod(PolicyCommand policyCommand,
@@ -374,18 +423,16 @@ public class SCAgentDriver implements ISCAgentDriver {
         settings.setCookie(cookie);
         settings.setPriority((short) flowPriority);
 
-        FlowMod flowMod = new FlowMod(policyCommand.getMatch(),actions,settings);
+        FlowMod flowMod = new FlowMod(policyCommand.getMatch(), actions, settings);
 
         return sendFlowMod(sw, flowMod);
     }
 
     public void setNosApi(INOSApi nosApi) {
-        if(this.nosApi == null) {
+        if (this.nosApi == null) {
             this.nosApi = nosApi;
         }
     }
-
-
 
 
     public String processSingleFlowCommand(PolicyCommand policyCommand) {
@@ -483,9 +530,10 @@ public class SCAgentDriver implements ISCAgentDriver {
         return count;
     }
 
-    /***
+    /**
      * process packet in according to policies
-     * @param nosApi api to create and send flowMod message
+     *
+     * @param nosApi   api to create and send flowMod message
      * @param packetIn
      * @return true to continue , false to break;
      */
@@ -529,7 +577,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             }
             // packets of unauthorized devices from specified dpid and inPort
             if (eth.etherType == Ethernet.TYPE_IPv4) {
-                IPv4PDU ip =(IPv4PDU) eth.next;
+                IPv4PDU ip = (IPv4PDU) eth.next;
 //                IPv4 ip = (IPv4) eth.getPayload();
                 IpAddress piNwSrc = ip.srcIpaddr;
                 // check if the source ip belongs to the specified subnet
@@ -562,15 +610,15 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 new Object[]{IPv4.fromIPv4Address((int) origNwDst),
                                         origDlDst,
                                         HexString.toHexString(packetIn.dpid, 8)});
-                        match.extractFlowInfo(eth,packetIn.inPort);
+                        match.extractFlowInfo(eth, packetIn.inPort);
 //                        match.loadFromPacket(pi.getPacketData(), pi.getInPort());
-                        match.wildCards =OFPConstant.OFWildCard.ALL
-                                &~OFPConstant.OFWildCard.SRC_MACADDR
-                                &~OFPConstant.OFWildCard.DST_MACADDR
+                        match.wildCards = OFPConstant.OFWildCard.ALL
+                                & ~OFPConstant.OFWildCard.SRC_MACADDR
+                                & ~OFPConstant.OFWildCard.DST_MACADDR
                                 & ~OFPConstant.OFWildCard.SRC_MASK
-                                &~OFPConstant.OFWildCard.DST_MASK &~OFPConstant.OFWildCard.ETHER_TYPE
-                                &~OFPConstant.OFWildCard.NW_PROTO &~OFPConstant.OFWildCard.DST_PORT
-                                &~OFPConstant.OFWildCard.SRC_PORT;
+                                & ~OFPConstant.OFWildCard.DST_MASK & ~OFPConstant.OFWildCard.ETHER_TYPE
+                                & ~OFPConstant.OFWildCard.NW_PROTO & ~OFPConstant.OFWildCard.DST_PORT
+                                & ~OFPConstant.OFWildCard.SRC_PORT;
 
                         DpidPortPair dpidPortPair = DeviceManager.getInstance().findHostByMac(byodCommand
                                 .getServerMac().toUpperCase());
@@ -588,7 +636,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                         // compute a route form device to authenication server
 //                        Route route = computeRoute(devAp, svrAp);
                         List<DpidPortPair> path = computeRoute(devAp, svrAp);
-                        if (path == null || path.size()<1) {
+                        if (path == null || path.size() < 1) {
                             logger.warn(
                                     "routeEngine cannot find a path from {} to {}",
                                     devAp.toString(), svrAp.toString());
@@ -599,7 +647,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                             if (j + 2 < path.size()) {
                                 // do nothing more than output
                                 IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
-                                flowModifier.addOutputAction(path.get(j+1).getPort(),0);
+                                flowModifier.addOutputAction(path.get(j + 1).getPort(), 0);
                                 flowModifier.setFlags(1);
                                 flowModifier.setHardTimeoutSec(0);
                                 flowModifier.setIdleTimeoutSec(500);
@@ -612,7 +660,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 IFlowModifier flowModifier = nosApi.createFlowModifierInstance(path.get(j).getDpid(), match);
                                 flowModifier.addSetDstIpaddrAction(IPv4.toIPv4Address(byodCommand.getServerIp()));
                                 flowModifier.addSetDstMacaddrAction(MACAddress.valueOf(byodCommand.getServerMac()).toLong());
-                                flowModifier.addOutputAction(path.get(j+1).getPort(),0);
+                                flowModifier.addOutputAction(path.get(j + 1).getPort(), 0);
                                 flowModifier.setFlags(1);
                                 flowModifier.setHardTimeoutSec(0);
                                 flowModifier.setIdleTimeoutSec(500);
@@ -643,8 +691,8 @@ public class SCAgentDriver implements ISCAgentDriver {
                         match1.srcPort = match
                                 .dstPort;
                         Flow match2 = match1.clone();
-                        match2.srcMacaddr=new MacAddress(origDlDst);
-                        match2.srcIpaddr= new IpAddress(origNwDst);
+                        match2.srcMacaddr = new MacAddress(origDlDst);
+                        match2.srcIpaddr = new IpAddress(origNwDst);
 
                         for (int j = path.size() - 1; j >= 0; j -= 2) {
                             if (j != path.size() - 1) {
@@ -658,7 +706,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                                 modifier1.setFlags(1);
                                 modifier1.setCookie(cookie);
                                 // set output port
-                                modifier1.addOutputAction(path.get(j-1).getPort(),0);
+                                modifier1.addOutputAction(path.get(j - 1).getPort(), 0);
                                 modifier1.send();
 
                             } else {
@@ -725,10 +773,10 @@ public class SCAgentDriver implements ISCAgentDriver {
             fm.setDeleteStrictCommand();
             fm.send();
         } catch (OFSwitchNotFoundException e) {
-            logger.warn("Create flowMod error. policy id: {}",policyCommand.getId());
+            logger.warn("Create flowMod error. policy id: {}", policyCommand.getId());
             e.printStackTrace();
         } catch (NosSocketIOException e) {
-            logger.warn("delete flow error. dpid: {}, match: {}",policyCommand.getDpid(),match);
+            logger.warn("delete flow error. dpid: {}, match: {}", policyCommand.getDpid(), match);
             e.printStackTrace();
         }
     }

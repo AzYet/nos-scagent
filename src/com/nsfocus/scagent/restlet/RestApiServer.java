@@ -109,7 +109,10 @@ public class RestApiServer extends ServerResource {
                 return gson.toJson(DeviceManager.getInstance()
                         .getMacDpidPortMap());
             }
+        }else if(op.equalsIgnoreCase("dijkstra")) {
+            scAgentDriver.dijkstra(new DpidPortPair(1,1),new DpidPortPair(4,1));
         }
+
         return "{}";
     }
 
@@ -185,8 +188,7 @@ public class RestApiServer extends ServerResource {
                 JsonElement jsonElement = ifObj.get("abc");
                 String connectTo = ifObj.get("connect_to").getAsString();
                 String mac = ifObj.get("mac").getAsString();
-                System.out
-                        .println("connect_to:" + connectTo + "\t mac: " + mac);
+                System.out.println("connect_to:" + connectTo + "\t mac: " + mac);
             }
             result = new StringRepresentation(text, MediaType.APPLICATION_JSON);
         } else if (op.equalsIgnoreCase("policyaction")) {
