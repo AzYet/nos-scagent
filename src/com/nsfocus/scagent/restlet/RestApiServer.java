@@ -109,10 +109,7 @@ public class RestApiServer extends ServerResource {
                 return gson.toJson(DeviceManager.getInstance()
                         .getMacDpidPortMap());
             }
-        }else if(op.equalsIgnoreCase("dijkstra")) {
-            scAgentDriver.dijkstra(new DpidPortPair(1,1),new DpidPortPair(4,1));
         }
-
         return "{}";
     }
 
@@ -279,10 +276,8 @@ public class RestApiServer extends ServerResource {
                         scheduledExecutor.schedule(new Runnable() {
                             @Override
                             public void run() {
-                                scAgentDriver.deletePolicies(restorePolicy.getType(),
-                                        restoreCommands);
-                                removeFromAllowPolicies(policyCommand
-                                        .getId());
+                                scAgentDriver.deletePolicies(restorePolicy.getType(), restoreCommands);
+                                removeFromAllowPolicies(policyCommand.getId());
                             }
                         }, policyCommand.getHardTimeout(), TimeUnit.SECONDS);
                     }
@@ -293,6 +288,11 @@ public class RestApiServer extends ServerResource {
                 return new StringRepresentation(gson.toJson(retMap));
             }
             result = new StringRepresentation(gson.toJson(policyCommands), MediaType.APPLICATION_JSON);
+        }else if(op.equalsIgnoreCase("dijkstra")) {
+            JsonArray dpids = parser.parse(text).getAsJsonArray();
+            short start = dpids.get(0).getAsShort();
+            short end = dpids.get(1).getAsShort();
+            List<DpidPortPair> dpidPortPairs = scAgentDriver.computeRoute(new DpidPortPair(start, 1), new DpidPortPair(end, 1));
         }
         return result;
     }
@@ -301,8 +301,7 @@ public class RestApiServer extends ServerResource {
     private String processRedirectFlowCommand(PolicyCommand policyCommand) {
         logger.info("Processing REDIRECT_FLOW policyCommand: {}", policyCommand);
         if (policyCommandsDeployed.containsKey(policyCommand.getId())) {
-            logger.error("a policyCommand with the same id={} exists!",
-                    policyCommand.getId());
+            logger.error("a policyCommand with the same id={} exists!", policyCommand.getId());
             return "a policyCommand with the same id exists!";
         }
         List<String> flowModMessageIds = new ArrayList<String>();
@@ -317,16 +316,12 @@ public class RestApiServer extends ServerResource {
                 SecurityDevice deviceStart = policyCommand.getDevices().get(i);
                 SecurityDevice deviceEnd = policyCommand.getDevices().get(i + 1);
                 List<DpidPortPair> path = scAgentDriver.computeRoute(
-                        getAttachmentPoint(deviceStart
-                                .getOutgressAttachmentPointInfo()),
-                        getAttachmentPoint(deviceEnd
-                                .getIngressAttachmentPointInfo()));
+                        getAttachmentPoint(deviceStart.getOutgressAttachmentPointInfo()),
+                        getAttachmentPoint(deviceEnd.getIngressAttachmentPointInfo()));
                 if (path == null || path.size() < 1) {
-                    logger.error(
-                            "routeEngine cannot find a path from {} to {}",
-                            deviceStart.getOutgressAttachmentPointInfo()
-                                    .toString(), deviceEnd
-                                    .getIngressAttachmentPointInfo().toString());
+                    logger.error("routeEngine cannot find a path from {} to {}",
+                            deviceStart.getOutgressAttachmentPointInfo().toString(),
+                            deviceEnd.getIngressAttachmentPointInfo().toString());
                     return "cannot find  a path ";
                 }
                 for (int j = 0; j < path.size() - 1; j += 2) {
@@ -393,16 +388,14 @@ public class RestApiServer extends ServerResource {
         for (PolicyCommandRelated policyPrior : policyCommandsRelatedPrior) {
             // 如果覆盖掉了pr相关策略的也应该删除
             boolean noAction = false;
-            List<PolicyCommandRelated> removedPolicies = PolicyCommandDeployed
-                    .removeCoveredPolicies(policyCommand,
-                            policyCommandsDeployed.get(policyPrior
-                                    .getPolicyCommnd().getId()),
-                            Direction.ASCEND);
+            List<PolicyCommandRelated> removedPolicies = PolicyCommandDeployed.removeCoveredPolicies(
+                    policyCommand,
+                    policyCommandsDeployed.get(policyPrior.getPolicyCommnd().getId()),
+                    Direction.ASCEND);
             if (!removedPolicies.isEmpty()) {
                 // 相应的流也应该删除
                 for (PolicyCommandRelated removed : removedPolicies) {
-                    if (removed.getPolicyCommnd().getId()
-                            .equals(policyCommand.getId())) {
+                    if (removed.getPolicyCommnd().getId().equals(policyCommand.getId())) {
                         noAction = true;
                         break;
                     }

@@ -55,7 +55,7 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     }
 
-    public List<DpidPortPair> dijkstra(DpidPortPair start, DpidPortPair end) {
+    public List<Trunk> dijkstra(DpidPortPair start, DpidPortPair end) {
         class Route {
             Route(Long target, int dist, List<Trunk> path) {
                 this.target = target;
@@ -74,8 +74,8 @@ public class SCAgentDriver implements ISCAgentDriver {
         Map<Long, Route> routeMap = new HashMap<Long, Route>();
         List<Long> resList = new LinkedList<Long>();
         routeMap.put(start.getDpid(), new Route(start.getDpid(), 0, null));
-        LinkedList<Long> uDpids = new LinkedList<Long>();
-        LinkedList<Long> sDpids = new LinkedList<Long>();
+        List<Long> uDpids = new CopyOnWriteArrayList<Long>();
+        List<Long> sDpids = new CopyOnWriteArrayList<Long>();
         sDpids.add(start.getDpid());
         for (LogicalSwitch logicalSwitch : topologyManager.getSwitchList()) {
             if (start.getDpid() != logicalSwitch.getDpid()) {
@@ -92,7 +92,7 @@ public class SCAgentDriver implements ISCAgentDriver {
                 long gtr = uDpid > cPoint ? uDpid : cPoint;
                 for (Trunk trunk : trunkList) {//for every target
                     if (trunk.getDpidPair()[0] == ltr && trunk.getDpidPair()[1] == gtr) { // is neighbour
-                        int dist = routeMap.get(uDpid).dist + 1;    //calculate new dist
+                        int dist = routeMap.get(cPoint).dist + 1;    //calculate new dist
                         if (dist < minDist.dist) {
                             List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
                             trunks.add(trunk);
@@ -112,7 +112,7 @@ public class SCAgentDriver implements ISCAgentDriver {
             cPoint = minDist.target;
         }
 
-        return null;
+        return routeMap.get(start.getDpid()).path;
     }
 
     private Long extraceMinDist(List<Trunk> trunkList, List<Long> uDpids, Long src) {

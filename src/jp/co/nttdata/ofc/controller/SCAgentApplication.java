@@ -253,10 +253,6 @@ public class SCAgentApplication implements INOSApplication{
 
 
             DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
-            //PC_Chen
-            if (!macDpidPortMap.containsKey(srcMac.toString().toUpperCase())) {
-                macDpidPortMap.put(srcMac.toString().toUpperCase(), p);
-            }
 
             scAgentDriver.handleIncomingPackets(nosApi, packetIn);
 

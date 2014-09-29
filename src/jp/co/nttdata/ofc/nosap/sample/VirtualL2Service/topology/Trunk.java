@@ -89,7 +89,6 @@ public class Trunk {
 				totalCounts[i] += counts[i];
 			}
 		}
-
 		return totalCounts;
 	}
 

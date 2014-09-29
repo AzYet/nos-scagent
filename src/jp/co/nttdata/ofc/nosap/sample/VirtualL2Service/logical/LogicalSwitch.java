@@ -7,6 +7,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import com.nsfocus.scagent.device.DeviceManager;
 import com.nsfocus.scagent.utility.Cypher;
 import com.nsfocus.scagent.utility.HexString;
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
@@ -29,6 +30,7 @@ import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.path.Path;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.path.PathManager;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
 
+import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Trunk;
 import jp.co.nttdata.ofc.protocol.packet.EthernetPDU;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -194,19 +196,19 @@ public class LogicalSwitch {
 		//add by PC_Chen
 		//to prevent broadcast storm 
 		
-		if(isMultiCastAddr(dstMac) && antiStorm(packetIn)){
+		/*if(isMultiCastAddr(dstMac) && antiStorm(packetIn)){
 			logger.info("droped a multicast pkt, dpid: {}, inPort: {} srcMac="+ packetIn.flow.srcMacaddr +
 					" dstMac=" + packetIn.flow.dstMacaddr,packetIn.dpid,packetIn.inPort);
 			return;
-		}
+		}*/
 		
 		if((p1 != null) && ((p1.getDpid() != packetIn.dpid) || (p1.getPort() != inPort))) {
             //PC_Chen: TODO: if this packet was broadcast, just ignore it
-            if (unicastPacketMulticast.containsKey(Cypher.getMD5(packetIn.data))) {
+            /*if (unicastPacketMulticast.containsKey(Cypher.getMD5(packetIn.data))) {
                 logger.info("ignore a multicast unicast pkt, {}-{} srcMac="+ packetIn.flow.srcMacaddr +
                         " dstMac=" + packetIn.flow.dstMacaddr+" "+packetIn.flow.etherType ,packetIn.dpid,packetIn.inPort);
                 return;
-            }
+            }*/
             this.removeMac(srcMac);
 
             Flow flow1 = Utility.createFlow(-1, srcMac, null, -1);
@@ -278,12 +280,12 @@ public class LogicalSwitch {
 
             //PC_Chen
             //if it's a unicast packet, record it
-            if (!isMultiCastAddr(packetIn.flow.dstMacaddr)) {
+            /*if (!isMultiCastAddr(packetIn.flow.dstMacaddr)) {
                 String hash = getMD5(packetIn.data);
                 if (!unicastPacketMulticast.containsKey(hash)) {
                     unicastPacketMulticast.put(hash, System.currentTimeMillis());
                 }
-            }
+            }*/
             this.packetOutToAll(nosApi, packetIn, inPort);
 		}
 		synchronized(this.dppl){
@@ -468,16 +470,128 @@ public class LogicalSwitch {
 
 		return ret;
 	}
+    static class PacketStats{
+        String hash;
+        Long dpid;
+        int port;
+        long timestamp;
 
+        PacketStats(String hash, Long dpid, int port, long timestamp) {
+            this.hash = hash;
+            this.dpid = dpid;
+            this.port = port;
+            this.timestamp = timestamp;
+        }
+    }
+    static Map<String,PacketStats> multiCastPkts = new ConcurrentHashMap<String, PacketStats>();
 	// 同一SWに属する受信ポート以外の全てのポートに転送する
+
+    public Map<Long, Set<Integer>> getTrunkPortsMap() {
+        // collect trunk ports
+        Map<Long,Set<Integer>> trunkMap = new HashMap<Long, Set<Integer>>();
+        for (Trunk trunk : TopologyManager.getInstance().getTrunkList()) {
+            long dpid0 = trunk.getDpidPair()[0];
+            long dpid1 = trunk.getDpidPair()[1];
+            if (!trunkMap.containsKey(dpid0)) {
+                trunkMap.put(dpid0, new HashSet<Integer>());
+            }
+            if (!trunkMap.containsKey(dpid1)) {
+                trunkMap.put(dpid1, new HashSet<Integer>());
+            }
+            trunkMap.get(dpid0).addAll(trunk.getFirstPortList());
+            trunkMap.get(dpid1).addAll(trunk.getSecondPortList());
+        }
+        logger.info("trunks: {}.",trunkMap);
+        return trunkMap;
+    }
+
 	private long packetOutToAll(INOSApi nosApi, PacketInEventVO packetIn, int inPort){
+
+        Map<Long, Set<Integer>> trunkMap = getTrunkPortsMap();
+        String macStr = packetIn.flow.srcMacaddr.toString().toUpperCase();
+        Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
+        DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
+        //PC_Chen: manage host
+        if (!macDpidPortMap.containsKey(macStr.toString().toUpperCase())) {
+            if(!trunkMap.get(p.getDpid()).contains(p.getPort()))
+                macDpidPortMap.put(macStr.toString().toUpperCase(), p);
+        }
+        DpidPortPair dpp = DeviceManager.getInstance().findHostByMac(macStr);
+        long ret = 0L;
+        if (dpp.getDpid() != packetIn.dpid || dpp.getPort() != packetIn.inPort) {   // packet not from the origin ap
+            logger.info("packet not from origin ap:"+packetIn.dpid+":"+packetIn.inPort+","+packetIn.flow.srcMacaddr+"->"+packetIn.flow.dstMacaddr+" etherType: "+packetIn.flow.etherType);
+            return ret;
+        }
+        long currentTimeMillis = System.currentTimeMillis();
+        String hash = getMD5(packetIn.data);
+        if(multiCastPkts.containsKey(hash)) {       //recevied the same pkt before, maybe new packet or looped
+
+            PacketStats packetStats = multiCastPkts.get(hash);
+            if (packetIn.dpid == packetStats.dpid && packetIn.inPort == packetStats.port){    //from the same point
+                if( currentTimeMillis - packetStats.timestamp < BCAST_INTERVAL) {   //2 packets too close
+                    logger.info("same packet too close");
+                    return ret;
+                } else {    //  prepare to broadcast it
+                    logger.info("cast same packet");
+                    packetStats.timestamp = currentTimeMillis;
+                }
+            }else{  //from a different port, host migrated, multicast it
+                logger.info("host migrated");
+                multiCastPkts.get(hash).timestamp = currentTimeMillis;
+                multiCastPkts.get(hash).dpid = packetIn.dpid;
+                multiCastPkts.get(hash).port = packetIn.inPort;
+            }
+        }else { //new packet met
+            logger.info("new packet");
+            multiCastPkts.put(hash, new PacketStats(hash, packetIn.dpid, packetIn.inPort, currentTimeMillis));
+        }
+        // packet_out to all dpid ports, not including inPort , trunk port
+        for (LogicalSwitch logicalSwitch : TopologyManager.getInstance().getSwitchList()) {
+            IPacketOut iOut;
+            String portsStr = "";
+            for (PhysicalPortVO physicalPort : logicalSwitch.physicalPorts.values()) {
+                portsStr += " "+physicalPort.portNo;
+            }
+            logger.info("dpid: {}, ports: {}",logicalSwitch.dpid,portsStr);
+            for (Entry<Integer, PhysicalPortVO> portVOEntry : logicalSwitch.physicalPorts.entrySet()) {
+                int port = portVOEntry.getKey();
+                if((logicalSwitch.dpid == packetIn.dpid && port == packetIn.inPort) || port == OFPort.LOCAL
+                        || trunkMap.containsKey(logicalSwitch.getDpid()) && trunkMap.get(logicalSwitch.getDpid()).contains(port)){
+                    continue;
+                }
+                try {
+                    iOut = nosApi.createPacketOutInstance(logicalSwitch.dpid, LogicalSwitch.checkPacketOutData(packetIn.data));
+                    iOut.setBufferId(LogicalSwitch.NONE_BUFFER_ID);
+                    iOut.setInPort(LogicalSwitch.NONE_PORT);
+                    iOut.addOutputAction(port);
+                    ret += iOut.send();
+                    logger.info("sent to {}:{}",logicalSwitch.getDpid(),port);
+                } catch (OFSwitchNotFoundException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                } catch (ArgumentInvalidException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                } catch (ActionNotSupportedException e) {
+                    // TODO ??????????????????????catch ????????????
+                    e.printStackTrace();
+                } catch (SwitchPortNotFoundException e) {
+                    // TODO ??????????????????????catch ????????????
+                    e.printStackTrace();
+                } catch (NosSocketIOException e) {
+                    // TODO ??????????????????????catch ????????????
+                    e.printStackTrace();
+                }
+
+            }
+        }
+		return ret;
+	}// 同一SWに属する受信ポート以外の全てのポートに転送する
+	private long packetOutToAll1(INOSApi nosApi, PacketInEventVO packetIn, int inPort){
         EthernetPDU eth = new EthernetPDU();
         eth.parse(new NetworkInputByteBuffer(packetIn.data));
         System.out.println("packetOut to all on dpid:"+packetIn.dpid+":"+packetIn.inPort+","+eth.srcMacaddr+"->"+eth.dstMacaddr+" etherType: "+eth.etherType);
 		long ret = 0L;
-//		if(antiStorm(packetIn)){
-//			return ret;
-//		}
 		IPacketOut iOut;
 		//for(DpidPortPair p : this.dppl){
 		for(Entry<Integer, PhysicalPortVO> entry: this.physicalPorts.entrySet()){
