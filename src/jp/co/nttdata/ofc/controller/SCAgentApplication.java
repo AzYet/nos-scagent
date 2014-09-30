@@ -1,10 +1,7 @@
 package jp.co.nttdata.ofc.controller;
 
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.LinkedList;
-import java.util.Map;
+import java.util.*;
 import java.util.Map.Entry;
 
 import com.nsfocus.scagent.manager.SCAgentDriver;
@@ -46,6 +43,8 @@ import jp.co.nttdata.ofc.protocol.packet.TlvPDU;
 import jp.co.nttdata.ofc.protocol.packet.LldpPDU.TlvType;
 
 import com.nsfocus.scagent.device.DeviceManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SCAgentApplication implements INOSApplication{
 	private TopologyManager topologyManager;
@@ -161,6 +160,20 @@ public class SCAgentApplication implements INOSApplication{
 		
 		System.out.println(Utility.toDpidHexString(datapathLeave.dpid) + " left.");
 	}
+
+    private static final long RECYCLE_INTERVAL = 60 * 1000;
+    static Logger logger = LoggerFactory.getLogger(SCAgentApplication.class);
+    static {
+        logger.info("start timer to clear multicast records periodically");
+        Timer timer = new Timer("recycle task");
+        timer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                logger.info("now clear multicast records");
+                LogicalSwitch.multiCastPkts.clear();
+            }
+        },10000,RECYCLE_INTERVAL);
+    }
 
 	@Override
 	public void packetInEvent(INOSApi nosApi, PacketInEventVO packetIn) {

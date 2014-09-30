@@ -8,6 +8,10 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.nsfocus.scagent.device.DeviceManager;
+import com.nsfocus.scagent.manager.SCAgentDriver;
+import com.nsfocus.scagent.model.FlowAction;
+import com.nsfocus.scagent.model.FlowMod;
+import com.nsfocus.scagent.model.FlowSettings;
 import com.nsfocus.scagent.utility.Cypher;
 import com.nsfocus.scagent.utility.HexString;
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
@@ -192,8 +196,35 @@ public class LogicalSwitch {
 
 		DpidPortPair p1 = this.getHost(srcMac);
 		DpidPortPair p2 = this.getHost(dstMac);
-		
-		//add by PC_Chen
+
+        Map<Long, Set<Integer>> trunkMap = getTrunkPortsMap();
+        String macStr = packetIn.flow.srcMacaddr.toString().toUpperCase();
+        Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
+        DpidPortPair dpp = new DpidPortPair(packetIn.dpid, packetIn.inPort);
+        //PC_Chen: manage host
+        if (!macDpidPortMap.containsKey(macStr.toString().toUpperCase())) {
+            if(trunkMap.get(dpp.getDpid()) == null || !trunkMap.get(dpp.getDpid()).contains(dpp.getPort()))
+                macDpidPortMap.put(macStr.toString().toUpperCase(), dpp);
+        }
+        DpidPortPair dstAp = macDpidPortMap.get(dstMac.toString().toUpperCase());
+        SCAgentDriver scAgentDriver = new SCAgentDriver();
+        if (dstAp==null) {
+            packetOutToAll(nosApi, packetIn, inPort);
+        }else {
+            List<DpidPortPair> path = scAgentDriver.computeRoute(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+            if(path == null || path.size() < 1) {
+                logger.info("no route between {}:{} and {}:{}", packetIn.dpid, inPort, dstAp.getDpid(), dstAp.getPort());
+                return;
+            }
+            for (int j = 0; j < path.size() - 1; j += 2) {
+                Flow flow = Utility.createFlow(path.get(j).getPort(), srcMac, dstMac, -1);
+                logger.info("add a flow to {}:{}->{}, {}->{}", path.get(j).getDpid(), path.get(j).getPort(),
+                        path.get(j + 1).getPort(), srcMac, dstMac);
+                addFlowEntry(nosApi, path.get(j).getDpid(), flow, path.get(j + 1).getPort(), 10, 50, 0, Utility.getNextCookie());
+            }
+            packetOutToTable(nosApi, packetIn, inPort);
+        }
+        //add by PC_Chen
 		//to prevent broadcast storm 
 		
 		/*if(isMultiCastAddr(dstMac) && antiStorm(packetIn)){
@@ -202,104 +233,104 @@ public class LogicalSwitch {
 			return;
 		}*/
 		
-		if((p1 != null) && ((p1.getDpid() != packetIn.dpid) || (p1.getPort() != inPort))) {
-            //PC_Chen: TODO: if this packet was broadcast, just ignore it
-            /*if (unicastPacketMulticast.containsKey(Cypher.getMD5(packetIn.data))) {
-                logger.info("ignore a multicast unicast pkt, {}-{} srcMac="+ packetIn.flow.srcMacaddr +
-                        " dstMac=" + packetIn.flow.dstMacaddr+" "+packetIn.flow.etherType ,packetIn.dpid,packetIn.inPort);
-                return;
-            }*/
-            this.removeMac(srcMac);
-
-            Flow flow1 = Utility.createFlow(-1, srcMac, null, -1);
-            Flow flow2 = Utility.createFlow(-1, null, srcMac, -1);
-
-            for (long dpid : topologyManager.getDpidSet()) {
-                this.deleteFlowEntry(nosApi, dpid, flow1);
-                this.deleteFlowEntry(nosApi, dpid, flow2);
-            }
-
-            pathManager.removeElements(srcMac);
-
-            System.out.println("Delete FlowEntries related MACAddress " + srcMac.toString());
-        } else if((p1 != null) && (p2 != null)){
-			long cookie;
-			Path path;
-			Flow flow;
-			if(p1.getDpid() == p2.getDpid()){
-				flow = Utility.createFlow(inPort, srcMac, dstMac, -1);
-				cookie = Utility.getNextCookie();
-				path = new Path(cookie, flow.srcMacaddr, flow.dstMacaddr, this.name);
-
-				pathManager.addPath(path);
-
-				this.addFlowEntry(nosApi, p2.getDpid(), flow, p2.getPort(), LOW, DEFAULT_IDLE_TIMEOUT, 0, cookie);
-				System.out.println(Utility.toDpidHexString(p1.getDpid()) + ":" + p1.getPort() + " -> " + Utility.toDpidHexString(p2.getDpid()) + ":" + p2.getPort());
-			}
-			else{
-				LinkedList<Long> dpidList = topologyManager.getHoppedDpidList(p1.getDpid(), p2.getDpid());
-
-				if(dpidList == null){
-					System.out.println("dpidArray Error.");
-					return;
-				}
-
-				long[] key = new long[2];
-				int in, out;
-				in = inPort;
-
-				cookie = Utility.getNextCookie();
-				path = new Path(cookie, srcMac, dstMac, this.name);
-				for(int i = 0; i < dpidList.size(); i++){
-					flow = Utility.createFlow(in, srcMac, dstMac, -1);
-					if(i == dpidList.size() - 1){
-						key[0] = key[1] = dpidList.get(i);
-						out = p2.getPort();
-					}
-					else{
-						key[0] = dpidList.get(i);
-						key[1] = dpidList.get(i + 1);
-						out = topologyManager.getForwardingTable().getPort(key);
-						in = topologyManager.getCorrespondPort(key[0], key[1], out);
-						path.add(key[0], out, key[1], in);
-					}
-					this.addFlowEntry(nosApi, key[0], flow, out, LOW, DEFAULT_IDLE_TIMEOUT, 0, cookie);
-					System.out.println(Utility.toDpidHexString(key[0]) + ":" + out + " -> " + Utility.toDpidHexString(key[1]) + ":" + in);
-				}
-				pathManager.addPath(path);
-			}
-			this.packetOutToTable(nosApi, packetIn, inPort);
-		}
-		else{
-			if((p1 != null) && (p2 == null)){
-				System.out.println("[p1] " + Utility.toDpidHexString(p1.getDpid()) + ":" + p1.getPort());
-			}
-			if((p1 == null) && (p2 != null)){
-				System.out.println("[p2] " + Utility.toDpidHexString(p2.getDpid()) + ":" + p2.getPort());
-			}
-
-            //PC_Chen
-            //if it's a unicast packet, record it
-            /*if (!isMultiCastAddr(packetIn.flow.dstMacaddr)) {
-                String hash = getMD5(packetIn.data);
-                if (!unicastPacketMulticast.containsKey(hash)) {
-                    unicastPacketMulticast.put(hash, System.currentTimeMillis());
-                }
-            }*/
-            this.packetOutToAll(nosApi, packetIn, inPort);
-		}
-		synchronized(this.dppl){
-			for(DpidPortPair p : this.dppl){
-				if((p.getDpid() == packetIn.dpid) && (p.getPort() == packetIn.inPort) && !this.macTable.containsKey(srcMac)){
-					this.addMac(srcMac, p);
-					Flow flow = Utility.createFlow(p.getPort(), null, srcMac, -1);
-					long cookie = Utility.getNextCookie();
-					Path path = new Path(cookie, flow.srcMacaddr, flow.dstMacaddr, this.name);
-					pathManager.addPath(path);
-					this.addFlowEntry(nosApi, packetIn.dpid, flow, -1, HIGH, 0, 0, cookie/*, false*/);
-				}
-			}
-		}
+//		if((p1 != null) && ((p1.getDpid() != packetIn.dpid) || (p1.getPort() != inPort))) {
+//            //PC_Chen: TODO: if this packet was broadcast, just ignore it
+//            /*if (unicastPacketMulticast.containsKey(Cypher.getMD5(packetIn.data))) {
+//                logger.info("ignore a multicast unicast pkt, {}-{} srcMac="+ packetIn.flow.srcMacaddr +
+//                        " dstMac=" + packetIn.flow.dstMacaddr+" "+packetIn.flow.etherType ,packetIn.dpid,packetIn.inPort);
+//                return;
+//            }*/
+//            this.removeMac(srcMac);
+//
+//            Flow flow1 = Utility.createFlow(-1, srcMac, null, -1);
+//            Flow flow2 = Utility.createFlow(-1, null, srcMac, -1);
+//
+//            for (long dpid : topologyManager.getDpidSet()) {
+//                this.deleteFlowEntry(nosApi, dpid, flow1);
+//                this.deleteFlowEntry(nosApi, dpid, flow2);
+//            }
+//
+//            pathManager.removeElements(srcMac);
+//
+//            System.out.println("Delete FlowEntries related MACAddress " + srcMac.toString());
+//        } else if((p1 != null) && (p2 != null)){
+//			long cookie;
+//			Path path;
+//			Flow flow;
+//			if(p1.getDpid() == p2.getDpid()){
+//				flow = Utility.createFlow(inPort, srcMac, dstMac, -1);
+//				cookie = Utility.getNextCookie();
+//				path = new Path(cookie, flow.srcMacaddr, flow.dstMacaddr, this.name);
+//
+//				pathManager.addPath(path);
+//
+//				this.addFlowEntry(nosApi, p2.getDpid(), flow, p2.getPort(), LOW, DEFAULT_IDLE_TIMEOUT, 0, cookie);
+//				logger.info(Utility.toDpidHexString(p1.getDpid()) + ":" + p1.getPort() + " -> " + Utility.toDpidHexString(p2.getDpid()) + ":" + p2.getPort());
+//			}
+//			else{
+//				LinkedList<Long> dpidList = topologyManager.getHoppedDpidList(p1.getDpid(), p2.getDpid());
+//
+//				if(dpidList == null){
+//					System.out.println("dpidArray Error.");
+//					return;
+//				}
+//
+//				long[] key = new long[2];
+//				int in, out;
+//				in = inPort;
+//
+//				cookie = Utility.getNextCookie();
+//				path = new Path(cookie, srcMac, dstMac, this.name);
+//				for(int i = 0; i < dpidList.size(); i++){
+//					flow = Utility.createFlow(in, srcMac, dstMac, -1);
+//					if(i == dpidList.size() - 1){
+//						key[0] = key[1] = dpidList.get(i);
+//						out = p2.getPort();
+//					}
+//					else{
+//						key[0] = dpidList.get(i);
+//						key[1] = dpidList.get(i + 1);
+//						out = topologyManager.getForwardingTable().getPort(key);
+//						in = topologyManager.getCorrespondPort(key[0], key[1], out);
+//						path.add(key[0], out, key[1], in);
+//					}
+//					this.addFlowEntry(nosApi, key[0], flow, out, LOW, DEFAULT_IDLE_TIMEOUT, 0, cookie);
+//					System.out.println(Utility.toDpidHexString(key[0]) + ":" + out + " -> " + Utility.toDpidHexString(key[1]) + ":" + in);
+//				}
+//				pathManager.addPath(path);
+//			}
+//			this.packetOutToTable(nosApi, packetIn, inPort);
+//		}
+//		else{
+//			if((p1 != null) && (p2 == null)){
+//				System.out.println("[p1] " + Utility.toDpidHexString(p1.getDpid()) + ":" + p1.getPort());
+//			}
+//			if((p1 == null) && (p2 != null)){
+//				System.out.println("[p2] " + Utility.toDpidHexString(p2.getDpid()) + ":" + p2.getPort());
+//			}
+//
+//            //PC_Chen
+//            //if it's a unicast packet, record it
+//            /*if (!isMultiCastAddr(packetIn.flow.dstMacaddr)) {
+//                String hash = getMD5(packetIn.data);
+//                if (!unicastPacketMulticast.containsKey(hash)) {
+//                    unicastPacketMulticast.put(hash, System.currentTimeMillis());
+//                }
+//            }*/
+//            this.packetOutToAll(nosApi, packetIn, inPort);
+//		}
+//		synchronized(this.dppl){
+//			for(DpidPortPair p : this.dppl){
+//				if((p.getDpid() == packetIn.dpid) && (p.getPort() == packetIn.inPort) && !this.macTable.containsKey(srcMac)){
+//					this.addMac(srcMac, p);
+//					Flow flow = Utility.createFlow(p.getPort(), null, srcMac, -1);
+//					long cookie = Utility.getNextCookie();
+//					Path path = new Path(cookie, flow.srcMacaddr, flow.dstMacaddr, this.name);
+//					pathManager.addPath(path);
+//					this.addFlowEntry(nosApi, packetIn.dpid, flow, -1, HIGH, 0, 0, cookie/*, false*/);
+//				}
+//			}
+//		}
 	}
 	
 	private boolean isMultiCastAddr(MacAddress dstMac) {
@@ -314,7 +345,7 @@ public class LogicalSwitch {
 	//dpidPktPortTimeMap, <dpid, <pktHash, port&time>>
 	static Map<Long, HashMap<String, Long[]>> dpidPktPortTimeMap = new ConcurrentHashMap<Long, HashMap<String, Long[]>>();
     static Map<String,Long> unicastPacketMulticast = new ConcurrentHashMap<String, Long>();
-    static {
+    /*static {
         Timer timer = new Timer("recycle task");
         timer.schedule(new TimerTask() {
             @Override
@@ -335,7 +366,7 @@ public class LogicalSwitch {
                 }
             }
         },10000,RECYCLE_INTERVAL);
-    }
+    }*/
 
 	private boolean antiStorm(PacketInEventVO packetIn) {
 		String hash = getMD5(packetIn.data);
@@ -483,7 +514,7 @@ public class LogicalSwitch {
             this.timestamp = timestamp;
         }
     }
-    static Map<String,PacketStats> multiCastPkts = new ConcurrentHashMap<String, PacketStats>();
+    public static Map<String,PacketStats> multiCastPkts = new ConcurrentHashMap<String, PacketStats>();
 	// 同一SWに属する受信ポート以外の全てのポートに転送する
 
     public Map<Long, Set<Integer>> getTrunkPortsMap() {
@@ -501,21 +532,13 @@ public class LogicalSwitch {
             trunkMap.get(dpid0).addAll(trunk.getFirstPortList());
             trunkMap.get(dpid1).addAll(trunk.getSecondPortList());
         }
-        logger.info("trunks: {}.",trunkMap);
         return trunkMap;
     }
 
 	private long packetOutToAll(INOSApi nosApi, PacketInEventVO packetIn, int inPort){
 
-        Map<Long, Set<Integer>> trunkMap = getTrunkPortsMap();
         String macStr = packetIn.flow.srcMacaddr.toString().toUpperCase();
-        Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
-        DpidPortPair p = new DpidPortPair(packetIn.dpid, packetIn.inPort);
-        //PC_Chen: manage host
-        if (!macDpidPortMap.containsKey(macStr.toString().toUpperCase())) {
-            if(!trunkMap.get(p.getDpid()).contains(p.getPort()))
-                macDpidPortMap.put(macStr.toString().toUpperCase(), p);
-        }
+        Map<Long, Set<Integer>> trunkMap = getTrunkPortsMap();
         DpidPortPair dpp = DeviceManager.getInstance().findHostByMac(macStr);
         long ret = 0L;
         if (dpp.getDpid() != packetIn.dpid || dpp.getPort() != packetIn.inPort) {   // packet not from the origin ap
@@ -546,11 +569,12 @@ public class LogicalSwitch {
             multiCastPkts.put(hash, new PacketStats(hash, packetIn.dpid, packetIn.inPort, currentTimeMillis));
         }
         // packet_out to all dpid ports, not including inPort , trunk port
+        logger.info("trunks: {}", trunkMap);
         for (LogicalSwitch logicalSwitch : TopologyManager.getInstance().getSwitchList()) {
             IPacketOut iOut;
-            String portsStr = "";
+            StringBuilder portsStr = new StringBuilder();
             for (PhysicalPortVO physicalPort : logicalSwitch.physicalPorts.values()) {
-                portsStr += " "+physicalPort.portNo;
+                portsStr.append(physicalPort.portNo).append(' ');
             }
             logger.info("dpid: {}, ports: {}",logicalSwitch.dpid,portsStr);
             for (Entry<Integer, PhysicalPortVO> portVOEntry : logicalSwitch.physicalPorts.entrySet()) {
