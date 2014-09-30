@@ -50,7 +50,6 @@ public class SCAgentApplication implements INOSApplication{
 	private TopologyManager topologyManager;
 	private MacAddress lldpMacAddress;
 	private Operator operator;
-	Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
     private SCAgentDriver scAgentDriver = SCAgentDriver.getInstance();
 
     public SCAgentApplication()

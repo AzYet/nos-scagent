@@ -204,7 +204,8 @@ public class LogicalSwitch {
         //PC_Chen: manage host
         if (!macDpidPortMap.containsKey(macStr.toString().toUpperCase())) {
             if(trunkMap.get(dpp.getDpid()) == null || !trunkMap.get(dpp.getDpid()).contains(dpp.getPort()))
-                macDpidPortMap.put(macStr.toString().toUpperCase(), dpp);
+                if(dpp.getDpid() !=0)
+                    macDpidPortMap.put(macStr.toString().toUpperCase(), dpp);
         }
         DpidPortPair dstAp = macDpidPortMap.get(dstMac.toString().toUpperCase());
         SCAgentDriver scAgentDriver = new SCAgentDriver();
