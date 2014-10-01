@@ -205,14 +205,15 @@ public class LogicalSwitch {
         if (!macDpidPortMap.containsKey(macStr.toString().toUpperCase())) {
             if(trunkMap.get(dpp.getDpid()) == null || !trunkMap.get(dpp.getDpid()).contains(dpp.getPort()))
                 if(dpp.getDpid() !=0)
-                    macDpidPortMap.put(macStr.toString().toUpperCase(), dpp);
+                    if(!trunkMap.containsKey(packetIn.dpid) || !trunkMap.get(packetIn.dpid).contains(inPort))
+                        macDpidPortMap.put(macStr.toString().toUpperCase(), dpp);
         }
         DpidPortPair dstAp = macDpidPortMap.get(dstMac.toString().toUpperCase());
         SCAgentDriver scAgentDriver = new SCAgentDriver();
         if (dstAp==null) {
             packetOutToAll(nosApi, packetIn, inPort);
         }else {
-            List<DpidPortPair> path = scAgentDriver.computeRoute(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+            List<DpidPortPair> path = scAgentDriver.dijkstra(new DpidPortPair(packetIn.dpid, inPort), dstAp);
             if(path == null || path.size() < 1) {
                 logger.info("no route between {}:{} and {}:{}", packetIn.dpid, inPort, dstAp.getDpid(), dstAp.getPort());
                 return;
@@ -542,6 +543,15 @@ public class LogicalSwitch {
         Map<Long, Set<Integer>> trunkMap = getTrunkPortsMap();
         DpidPortPair dpp = DeviceManager.getInstance().findHostByMac(macStr);
         long ret = 0L;
+
+        if (trunkMap.containsKey(packetIn.dpid) && trunkMap.get(packetIn.dpid).contains(inPort)) {
+            logger.info("no multicast packet from trunk port");
+            return ret;
+        }
+        if (dpp == null) {
+            logger.info("no multicast mac not registered yet");
+            return ret;
+        }
         if (dpp.getDpid() != packetIn.dpid || dpp.getPort() != packetIn.inPort) {   // packet not from the origin ap
             logger.info("packet not from origin ap:"+packetIn.dpid+":"+packetIn.inPort+","+packetIn.flow.srcMacaddr+"->"+packetIn.flow.dstMacaddr+" etherType: "+packetIn.flow.etherType);
             return ret;

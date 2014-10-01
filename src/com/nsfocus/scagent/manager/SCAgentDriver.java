@@ -55,19 +55,23 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     }
 
-    public List<Trunk> dijkstra(DpidPortPair start, DpidPortPair end) {
-        class Route {
-            Route(Long target, int dist, List<Trunk> path) {
-                this.target = target;
-                this.dist = dist;
-                if (path != null)
-                    this.path = path;
-            }
-            Long target;
-            int dist;
-            List<Trunk> path = new LinkedList<Trunk>();
+    public static class Route {
+        Route(Long target, int dist, List<Trunk> path) {
+            this.target = target;
+            this.dist = dist;
+            if (path != null)
+                this.path = path;
         }
+        Long target;
+        int dist;
+        List<Trunk> path = new LinkedList<Trunk>();
+    }
 
+
+    public List<DpidPortPair> dijkstra(DpidPortPair start, DpidPortPair end) {
+        if (start.getDpid() == end.getDpid()) {
+            return Arrays.asList(new DpidPortPair[]{start, end});
+        }
         TopologyManager topologyManager = TopologyManager.getInstance();
         CopyOnWriteArrayList<Trunk> trunkList = topologyManager.getTrunkList();
         // <target:{dist,path}>
@@ -84,35 +88,63 @@ public class SCAgentDriver implements ISCAgentDriver {
                         new Route(logicalSwitch.getDpid(), Integer.MAX_VALUE, null));
             }
         }
-        Long cPoint = start.getDpid();
+        List<Long> vertexPending = new ArrayList<Long>(Arrays.asList(new Long[]{start.getDpid()}));
+        gotIt:
         while (!uDpids.isEmpty()) {
-            Route minDist = new Route(0L, Integer.MAX_VALUE, null);
-            for (Long uDpid : uDpids) {
-                long ltr = uDpid < cPoint ? uDpid : cPoint;
-                long gtr = uDpid > cPoint ? uDpid : cPoint;
-                for (Trunk trunk : trunkList) {//for every target
-                    if (trunk.getDpidPair()[0] == ltr && trunk.getDpidPair()[1] == gtr) { // is neighbour
-                        int dist = routeMap.get(cPoint).dist + 1;    //calculate new dist
-                        if (dist < minDist.dist) {
-                            List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
-                            trunks.add(trunk);
-                            minDist = new Route(uDpid, dist, trunks);
-                        }
-                        if (dist < routeMap.get(uDpid).dist) {
-                            List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
-                            trunks.add(trunk);
-                            routeMap.get(uDpid).dist = dist;
-                            routeMap.get(uDpid).path = trunks;
+            for (Long cPoint : new ArrayList<Long>(vertexPending)) {
+                Route orig = new Route(0L, Integer.MAX_VALUE, null);
+                List<Route> minDist = new LinkedList<Route>();
+                minDist.add(orig);
+                for (Long uDpid : uDpids) {
+                    long ltr = uDpid < cPoint ? uDpid : cPoint;
+                    long gtr = uDpid > cPoint ? uDpid : cPoint;
+                    for (Trunk trunk : trunkList) {//for every target
+                        if (trunk.getDpidPair()[0] == ltr && trunk.getDpidPair()[1] == gtr) { // is neighbour
+                            int dist = routeMap.get(cPoint).dist + 1;    //calculate new dist
+                            if (dist < minDist.get(0).dist) {
+                                List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
+                                trunks.add(trunk);
+                                minDist.clear();
+                                minDist.add(new Route(uDpid, dist, trunks));
+                            } else if (dist == minDist.get(0).dist) {
+                                List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
+                                trunks.add(trunk);
+                                minDist.add(new Route(uDpid, dist, trunks));
+                            }
+                            if (dist < routeMap.get(uDpid).dist) {
+                                List<Trunk> trunks = new LinkedList<Trunk>(routeMap.get(cPoint).path);
+                                trunks.add(trunk);
+                                routeMap.get(uDpid).dist = dist;
+                                routeMap.get(uDpid).path = trunks;
+                            }
                         }
                     }
                 }
+                if (minDist.contains(end.getDpid())) {
+                    break gotIt;
+                }
+                for (Route newMin : minDist) {
+                    resList.add(newMin.target);
+                    uDpids.remove(newMin.target);
+                    vertexPending.add(newMin.target);
+                }
+                vertexPending.remove(cPoint);
             }
-            resList.add(minDist.target);
-            uDpids.remove(minDist.target);
-            cPoint = minDist.target;
         }
-
-        return routeMap.get(start.getDpid()).path;
+        List<Trunk> route = routeMap.get(end.getDpid()).path;
+        LinkedList<DpidPortPair> path = new LinkedList<DpidPortPair>();
+        path.add(start);
+        for (Trunk trunk : route) {
+            if (path.getLast().getDpid() == trunk.getDpidPair()[0]) {
+                path.add(new DpidPortPair(trunk.getDpidPair()[0], trunk.getEdgeList().get(0).getPorts()[0]));
+                path.add(new DpidPortPair(trunk.getDpidPair()[1], trunk.getEdgeList().get(0).getPorts()[1]));
+            } else {
+                path.add(new DpidPortPair(trunk.getDpidPair()[1], trunk.getEdgeList().get(0).getPorts()[1]));
+                path.add(new DpidPortPair(trunk.getDpidPair()[0], trunk.getEdgeList().get(0).getPorts()[0]));
+            }
+        }
+        path.add(end);
+        return path;
     }
 
     private Long extraceMinDist(List<Trunk> trunkList, List<Long> uDpids, Long src) {

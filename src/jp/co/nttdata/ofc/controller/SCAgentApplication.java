@@ -156,8 +156,15 @@ public class SCAgentApplication implements INOSApplication{
 		if(srcSw != null){
 			topologyManager.getSwitchList().remove(srcSw);	
 		}	
-		
-		System.out.println(Utility.toDpidHexString(datapathLeave.dpid) + " left.");
+        //PC_Chen remove devices on the dpid
+        Map<String, DpidPortPair> macDpidPortMap = DeviceManager.getInstance().getMacDpidPortMap();
+        for (Entry<String, DpidPortPair> stringDpidPortPairEntry : macDpidPortMap.entrySet()) {
+            if (stringDpidPortPairEntry.getValue().getDpid() == datapathLeave.dpid) {
+                macDpidPortMap.remove(stringDpidPortPairEntry.getKey());
+            }
+        }
+
+        System.out.println(Utility.toDpidHexString(datapathLeave.dpid) + " left.");
 	}
 
     private static final long RECYCLE_INTERVAL = 60 * 1000;
@@ -219,20 +226,24 @@ public class SCAgentApplication implements INOSApplication{
 						topologyManager.getSwitchList().add(srcSw);
 					}				
 					if(!srcSw.contains(host))
-						srcSw.add(host);	
-					
-					System.out.println(" "+srcDpid + "/"+srcPort +"-->"+dstDpid+"/"+dstPort);
-					
+						srcSw.add(host);
+/*
+                    //PC_Chen: print switch ports
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(" " + srcDpid + "/" + srcPort + "-->" + dstDpid + "/" + dstPort + "\n");
+
 					for(LogicalSwitch sw: topologyManager.getSwitchList()){
-						System.out.print("switch [" + sw.getName()+"]:");
+						sb.append("switch [" + sw.getName() + "]:");
 						for(DpidPortPair pair: sw.getDpidPortPairList()){
 							if(pair != null)
-								System.out.print("("+pair.getDpid() + "/"+pair.getPort()+")\t");
+								sb.append("(" + pair.getDpid() + "/" + pair.getPort() + ")\t");
 						}
-						System.out.println("");
+						sb.append("\n");
 					}
-					System.out.println("================================================");
-				}
+					sb.append("================================================\n");
+                    logger.info(sb.toString());
+*/
+                }
 			}
 			else{
 				System.out.println("LLDP packet is detected, but OFC does not work LLDP mode.");
@@ -470,7 +481,14 @@ public class SCAgentApplication implements INOSApplication{
 				}
 			}
 		}
-
+        //PC_Chen: delte devices on trunk ports
+        Map<String, DpidPortPair> devMap = DeviceManager.getInstance().getMacDpidPortMap();
+        for (String s : devMap.keySet()) {
+            if (devMap.get(s).getDpid() == dpid1 && devMap.get(s).getPort() == port1
+                    || devMap.get(s).getDpid() == dpid2 && devMap.get(s).getPort() == port2) {
+                devMap.remove(s);
+            }
+        }
 		if(flag){
 			System.out.println("Detect new edge " + Utility.toDpidHexString(dpid1) + ":" + port1 + " - " + Utility.toDpidHexString(dpid2) + ":" + port2);
 			if(this.topologyManager.addTrunk(new DpidPortPair(dpid1, port1), new DpidPortPair(dpid2, port2))){
@@ -482,7 +500,7 @@ public class SCAgentApplication implements INOSApplication{
 			else{
 				return false;
 			}
-		}
+        }
 		else{
 			return false;
 		}

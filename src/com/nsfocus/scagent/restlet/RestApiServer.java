@@ -2,6 +2,7 @@ package com.nsfocus.scagent.restlet;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -16,6 +17,9 @@ import com.nsfocus.scagent.utility.MACAddress;
 import jp.co.nttdata.ofc.nos.common.constant.OFPConstant;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.common.DpidPortPair;
 
+import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.logical.LogicalSwitch;
+import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.TopologyManager;
+import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology.Trunk;
 import org.restlet.Component;
 import org.restlet.data.Form;
 import org.restlet.data.MediaType;
@@ -109,6 +113,11 @@ public class RestApiServer extends ServerResource {
                 return gson.toJson(DeviceManager.getInstance()
                         .getMacDpidPortMap());
             }
+        } else if(op.equalsIgnoreCase("trunk")){
+            CopyOnWriteArrayList<Trunk> trunkList = TopologyManager.getInstance().getTrunkList();
+            return gson.toJson(trunkList);
+        } else if(op.equalsIgnoreCase("multicast")){
+            return gson.toJson(LogicalSwitch.multiCastPkts);
         }
         return "{}";
     }
@@ -290,9 +299,13 @@ public class RestApiServer extends ServerResource {
             result = new StringRepresentation(gson.toJson(policyCommands), MediaType.APPLICATION_JSON);
         }else if(op.equalsIgnoreCase("dijkstra")) {
             JsonArray dpids = parser.parse(text).getAsJsonArray();
-            short start = dpids.get(0).getAsShort();
-            short end = dpids.get(1).getAsShort();
-            List<DpidPortPair> dpidPortPairs = scAgentDriver.computeRoute(new DpidPortPair(start, 1), new DpidPortPair(end, 1));
+            String[] start = dpids.get(0).getAsString().split(":");
+
+            String[] end = dpids.get(1).getAsString().split(":");
+            List<DpidPortPair> dpidPortPairs = scAgentDriver.dijkstra(new DpidPortPair(Integer.parseInt(start[0]), Integer.parseInt(start[1])),
+                    new DpidPortPair(Integer.parseInt(end[0]), Integer.parseInt(end[1])));
+            return new StringRepresentation(gson.toJson(dpidPortPairs), MediaType.APPLICATION_JSON);
+
         }
         return result;
     }
