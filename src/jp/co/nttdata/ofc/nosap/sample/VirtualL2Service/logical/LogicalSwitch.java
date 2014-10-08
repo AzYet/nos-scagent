@@ -210,10 +210,12 @@ public class LogicalSwitch {
         }
         DpidPortPair dstAp = macDpidPortMap.get(dstMac.toString().toUpperCase());
         SCAgentDriver scAgentDriver = new SCAgentDriver();
+        DpidPortPair srcAP = new DpidPortPair(packetIn.dpid, inPort);
         if (dstAp==null) {
             packetOutToAll(nosApi, packetIn, inPort);
         }else {
             List<DpidPortPair> path = scAgentDriver.dijkstra(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+
             if(path == null || path.size() < 1) {
                 logger.info("no route between {}:{} and {}:{}", packetIn.dpid, inPort, dstAp.getDpid(), dstAp.getPort());
                 return;
@@ -553,7 +555,8 @@ public class LogicalSwitch {
             return ret;
         }
         if (dpp.getDpid() != packetIn.dpid || dpp.getPort() != packetIn.inPort) {   // packet not from the origin ap
-            logger.info("packet not from origin ap:"+packetIn.dpid+":"+packetIn.inPort+","+packetIn.flow.srcMacaddr+"->"+packetIn.flow.dstMacaddr+" etherType: "+packetIn.flow.etherType);
+            logger.info("not from origin ap,should be {}:{} but is "+packetIn.dpid+":"+packetIn.inPort+","+packetIn.flow.srcMacaddr+"->"+packetIn.flow.dstMacaddr+" etherType: "+packetIn.flow.etherType,
+                    dpp.getDpid(),dpp.getPort());
             return ret;
         }
         long currentTimeMillis = System.currentTimeMillis();
