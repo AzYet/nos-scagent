@@ -214,7 +214,8 @@ public class LogicalSwitch {
         if (dstAp==null) {
             packetOutToAll(nosApi, packetIn, inPort);
         }else {
-            List<DpidPortPair> path = scAgentDriver.dijkstra(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+//            List<DpidPortPair> path = scAgentDriver.dijkstra(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+            List<DpidPortPair> path = scAgentDriver.computeRoute(new DpidPortPair(packetIn.dpid, inPort), dstAp);
 
             if(path == null || path.size() < 1) {
                 logger.info("no route between {}:{} and {}:{}", packetIn.dpid, inPort, dstAp.getDpid(), dstAp.getPort());

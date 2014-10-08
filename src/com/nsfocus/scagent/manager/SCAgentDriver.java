@@ -69,6 +69,7 @@ public class SCAgentDriver implements ISCAgentDriver {
 
 
     public List<DpidPortPair> dijkstra(DpidPortPair start, DpidPortPair end) {
+        logger.info("computing a route from {}:{} to {}:{}", start.getDpid(), start.getPort(), end.getDpid(), end.getPort());
         if (start.getDpid() == end.getDpid()) {
             return Arrays.asList(new DpidPortPair[]{start, end});
         }
