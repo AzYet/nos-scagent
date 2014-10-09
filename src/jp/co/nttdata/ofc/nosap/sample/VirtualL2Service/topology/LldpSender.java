@@ -1,5 +1,6 @@
 package jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.topology;
 
+import java.util.Map;
 import java.util.Set;
 
 import jp.co.nttdata.ofc.common.except.NosSocketIOException;
@@ -10,6 +11,7 @@ import jp.co.nttdata.ofc.nos.api.except.ActionNotSupportedException;
 import jp.co.nttdata.ofc.nos.api.except.ArgumentInvalidException;
 import jp.co.nttdata.ofc.nos.api.except.OFSwitchNotFoundException;
 import jp.co.nttdata.ofc.nos.api.except.SwitchPortNotFoundException;
+import jp.co.nttdata.ofc.nos.api.vo.PhysicalPortVO;
 import jp.co.nttdata.ofc.nosap.sample.VirtualL2Service.logical.LogicalSwitch;
 
 public class LldpSender implements Runnable{
@@ -38,8 +40,19 @@ public class LldpSender implements Runnable{
 
 		try {
 			IPacketOut iOut = nosApi.createPacketOutInstance(dpid, data);
-			for(int port = 1; port <= TopologyManager.PORT_NUM; port++){
-				byte[] packetData = lpg.getByte(dpid, port);
+            //PC_Chen
+            LogicalSwitch lsw = null;
+            for (LogicalSwitch logicalSwitch : TopologyManager.getInstance().getSwitchList()) {
+                if (logicalSwitch.getDpid() == dpid) {
+                    lsw = logicalSwitch;
+                }
+            }
+            if (lsw == null) {
+                return false;
+            }
+//            for(int port = 1; port <= TopologyManager.PORT_NUM; port++){
+            for (Integer port : lsw.getPhysicalPorts().keySet()) {
+            byte[] packetData = lpg.getByte(dpid, port);
 				try {
 					iOut.setInPort(LogicalSwitch.NONE_PORT);
 					iOut.addOutputAction(port);
@@ -47,7 +60,7 @@ public class LldpSender implements Runnable{
 //					System.err.println(Utility.toDpidHexString(dpid) + "-" + port + " does not exist.");
 				}
 				iOut.setData(packetData);
-				iOut.addSetSrcMacaddrAction(port);
+//				iOut.addSetSrcMacaddrAction(port);
 				iOut.send();
 				iOut.clearAction();
 			}

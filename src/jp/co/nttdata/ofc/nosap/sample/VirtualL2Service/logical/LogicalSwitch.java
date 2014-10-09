@@ -167,7 +167,7 @@ public class LogicalSwitch {
 
 	public boolean addMac(MacAddress mac, DpidPortPair p){
 		this.macTable.put(mac, p);
-		System.out.println(this.name + " learn MAC Address " + mac.toString());
+//		System.out.println(this.name + " learn MAC Address " + mac.toString());
 
 		return true;
 	}
@@ -192,7 +192,7 @@ public class LogicalSwitch {
 		MacAddress srcMac = packetIn.flow.srcMacaddr;
 		MacAddress dstMac = packetIn.flow.dstMacaddr;
 
-		System.out.println(packetIn.dpid +":"+packetIn.inPort+"srcMac:" + srcMac.toString() + ", dstMac:" + dstMac.toString()+"\n etherType: "+ Utility.toDpidHexString(packetIn.flow.etherType));
+//		System.out.println(packetIn.dpid +":"+packetIn.inPort+"srcMac:" + srcMac.toString() + ", dstMac:" + dstMac.toString()+"\n etherType: "+ Utility.toDpidHexString(packetIn.flow.etherType));
 
 		DpidPortPair p1 = this.getHost(srcMac);
 		DpidPortPair p2 = this.getHost(dstMac);
@@ -212,10 +212,11 @@ public class LogicalSwitch {
         SCAgentDriver scAgentDriver = new SCAgentDriver();
         DpidPortPair srcAP = new DpidPortPair(packetIn.dpid, inPort);
         if (dstAp==null) {
-            packetOutToAll(nosApi, packetIn, inPort);
+            if(!getTrunkPortsMap().isEmpty())
+                packetOutToAll(nosApi, packetIn, inPort);
         }else {
-//            List<DpidPortPair> path = scAgentDriver.dijkstra(new DpidPortPair(packetIn.dpid, inPort), dstAp);
-            List<DpidPortPair> path = scAgentDriver.computeRoute(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+            List<DpidPortPair> path = scAgentDriver.dijkstra(new DpidPortPair(packetIn.dpid, inPort), dstAp);
+//            List<DpidPortPair> path = scAgentDriver.computeRoute(new DpidPortPair(packetIn.dpid, inPort), dstAp);
 
             if(path == null || path.size() < 1) {
                 logger.info("no route between {}:{} and {}:{}", packetIn.dpid, inPort, dstAp.getDpid(), dstAp.getPort());
@@ -548,7 +549,7 @@ public class LogicalSwitch {
         long ret = 0L;
 
         if (trunkMap.containsKey(packetIn.dpid) && trunkMap.get(packetIn.dpid).contains(inPort)) {
-            logger.info("no multicast packet from trunk port");
+            logger.info("no multicast packet from trunk port {}:{}",packetIn.dpid,inPort);
             return ret;
         }
         if (dpp == null) {
@@ -556,8 +557,8 @@ public class LogicalSwitch {
             return ret;
         }
         if (dpp.getDpid() != packetIn.dpid || dpp.getPort() != packetIn.inPort) {   // packet not from the origin ap
-            logger.info("not from origin ap,should be {}:{} but is "+packetIn.dpid+":"+packetIn.inPort+","+packetIn.flow.srcMacaddr+"->"+packetIn.flow.dstMacaddr+" etherType: "+packetIn.flow.etherType,
-                    dpp.getDpid(),dpp.getPort());
+//            logger.info("not from origin ap,should be {}:{} but is "+packetIn.dpid+":"+packetIn.inPort+","+packetIn.flow.srcMacaddr+"->"+packetIn.flow.dstMacaddr+" etherType: "+packetIn.flow.etherType,
+//                    dpp.getDpid(),dpp.getPort());
             return ret;
         }
         long currentTimeMillis = System.currentTimeMillis();
@@ -567,10 +568,10 @@ public class LogicalSwitch {
             PacketStats packetStats = multiCastPkts.get(hash);
             if (packetIn.dpid == packetStats.dpid && packetIn.inPort == packetStats.port){    //from the same point
                 if( currentTimeMillis - packetStats.timestamp < BCAST_INTERVAL) {   //2 packets too close
-                    logger.info("same packet too close");
+                    logger.info("same packet too close: {}", hash);
                     return ret;
                 } else {    //  prepare to broadcast it
-                    logger.info("cast same packet");
+                    logger.info("cast same packet: {}", hash);
                     packetStats.timestamp = currentTimeMillis;
                 }
             }else{  //from a different port, host migrated, multicast it
@@ -604,7 +605,7 @@ public class LogicalSwitch {
                     iOut.setInPort(LogicalSwitch.NONE_PORT);
                     iOut.addOutputAction(port);
                     ret += iOut.send();
-                    logger.info("sent to {}:{}",logicalSwitch.getDpid(),port);
+//                    logger.info("sent to {}:{}",logicalSwitch.getDpid(),port);
                 } catch (OFSwitchNotFoundException e) {
                     // TODO Auto-generated catch block
                     e.printStackTrace();

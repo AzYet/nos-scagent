@@ -76,6 +76,7 @@ public class SCAgentApplication implements INOSApplication{
         //PC_Chen
         //send set-config message , set missSendLen 0xffff
         try {
+            logger.info("{}: send set-config message , set missSendLen 0xffff",datapathJoin.dpid);
             nosApi.sendSetConfigRequest(datapathJoin.dpid, 0, 0xffff);
         } catch (NosSocketIOException e) {
             e.printStackTrace();
@@ -253,8 +254,8 @@ public class SCAgentApplication implements INOSApplication{
                 System.out.println("ignoring packet from port any on dpid:"+packetIn.dpid);
                 return;
             }
-            System.out.println("\npacketInEvent has invoked from " + Utility.toDpidHexString(packetIn.dpid)
-                    + ":" + packetIn.inPort+":"+packetIn.flow.srcMacaddr+"--"+packetIn.flow.dstMacaddr + "etherType: "+packetIn.flow.etherType+ ".");
+//            System.out.println("\npacketInEvent has invoked from " + Utility.toDpidHexString(packetIn.dpid)
+//                    + ":" + packetIn.inPort+":"+packetIn.flow.srcMacaddr+"--"+packetIn.flow.dstMacaddr + "etherType: "+packetIn.flow.etherType+ ".");
             DpidPortPair host = topologyManager.findDpidPortPair(packetIn.dpid, packetIn.inPort);
             if (host == null) {
                 host = new DpidPortPair(packetIn.dpid, packetIn.inPort);
@@ -393,6 +394,8 @@ public class SCAgentApplication implements INOSApplication{
 		if(lldp.optional.size() != 2)
 		{
 			throw new NosapFormatErrorException(ERROR_MESSAGE);
+//            logger.info("unknown lldp packet is packet_in");
+//            return;
 		}
 
 		TlvPDU tlv = lldp.optional.get(0);

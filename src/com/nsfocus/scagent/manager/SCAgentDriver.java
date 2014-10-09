@@ -55,20 +55,21 @@ public class SCAgentDriver implements ISCAgentDriver {
 
     }
 
-    public static class Route {
-        Route(Long target, int dist, List<Trunk> path) {
-            this.target = target;
-            this.dist = dist;
-            if (path != null)
-                this.path = path;
-        }
-        Long target;
-        int dist;
-        List<Trunk> path = new LinkedList<Trunk>();
-    }
-
 
     public List<DpidPortPair> dijkstra(DpidPortPair start, DpidPortPair end) {
+
+        class Route {
+            Route(Long target, int dist, List<Trunk> path) {
+                this.target = target;
+                this.dist = dist;
+                if (path != null)
+                    this.path = path;
+            }
+            Long target;
+            int dist;
+            List<Trunk> path = new LinkedList<Trunk>();
+        }
+
         logger.info("computing a route from {}:{} to {}:{}", start.getDpid(), start.getPort(), end.getDpid(), end.getPort());
         if (start.getDpid() == end.getDpid()) {
             return Arrays.asList(new DpidPortPair[]{start, end});
@@ -91,7 +92,7 @@ public class SCAgentDriver implements ISCAgentDriver {
         }
         List<Long> vertexPending = new ArrayList<Long>(Arrays.asList(new Long[]{start.getDpid()}));
         gotIt:
-        while (!uDpids.isEmpty()) {
+        while (!uDpids.isEmpty() && !vertexPending.isEmpty()) {
             for (Long cPoint : new ArrayList<Long>(vertexPending)) {
                 Route orig = new Route(0L, Integer.MAX_VALUE, null);
                 List<Route> minDist = new LinkedList<Route>();
@@ -133,6 +134,9 @@ public class SCAgentDriver implements ISCAgentDriver {
             }
         }
         List<Trunk> route = routeMap.get(end.getDpid()).path;
+        if (route.isEmpty()) {
+            return null;
+        }
         LinkedList<DpidPortPair> path = new LinkedList<DpidPortPair>();
         path.add(start);
         for (Trunk trunk : route) {
