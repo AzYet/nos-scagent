@@ -11,10 +11,10 @@ public class AttachmentPointInfo {
     public AttachmentPointInfo() {
 		super();
 	}
-	public AttachmentPointInfo(byte[] mac, String attchmentPoint) {
+	public AttachmentPointInfo(byte[] mac, String attachmentPoint) {
 		super();
 		this.mac = mac;
-		this.attchmentPoint = attchmentPoint;
+		this.attchmentPoint = attachmentPoint;
 	}
 	public byte[] getMac() {
 		return mac;
@@ -32,8 +32,8 @@ public class AttachmentPointInfo {
     @Override
     public String toString() {
         return "AttachmentPointInfo{" +
-                "mac=" + MACAddress.valueOf(mac) +
-                ", attchmentPoint='" + attchmentPoint + '\'' +
+                "mac=" + (mac == null ? "null":MACAddress.valueOf(mac)) +
+                ", attchmentPoint='" + (attchmentPoint ==null ? "null":attchmentPoint)+ '\'' +
                 '}';
     }
 }

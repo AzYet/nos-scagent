@@ -164,7 +164,7 @@ public class PolicyCommand implements Comparable<PolicyCommand> {
                 policyCommand.setMask((byte) flowCommandNode.get("mask").getAsInt());
                 policyCommand.setServerIp(flowCommandNode.get("serverIp").getAsString());
                 policyCommand.setServerMac(flowCommandNode.get("serverMac").getAsString());
-                String commandName = flowCommandNode.get("commandName").getAsString();
+                String commandName = flowCommandNode.get("commandName").toString();
                 policyCommand.setPolicyName(commandName);
 
                 pmList.add(policyCommand);

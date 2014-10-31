@@ -10,20 +10,20 @@ public class SecurityDevice {
 	protected String deviceName;
 	protected int deviceTag;
 	protected AttachmentPointInfo ingressAttachmentPointInfo;
-	protected AttachmentPointInfo outgressAttachmentPointInfo;
+	protected AttachmentPointInfo egressAttachmentPointInfo;
 	
 	public SecurityDevice() {
 		super();
 	}
 
 	public SecurityDevice(String deviceKey, String deviceName, int deviceTag,
-			AttachmentPointInfo ingressAttachmentPointInfo, AttachmentPointInfo outgressAttachmentPointInfo) {
+			AttachmentPointInfo ingressAttachmentPointInfo, AttachmentPointInfo egressAttachmentPointInfo) {
 		super();
 		this.deviceKey = deviceKey;
 		this.deviceName = deviceName;
 		this.deviceTag = deviceTag;
 		this.ingressAttachmentPointInfo = ingressAttachmentPointInfo;
-		this.outgressAttachmentPointInfo = outgressAttachmentPointInfo;
+		this.egressAttachmentPointInfo = egressAttachmentPointInfo;
 	}
 	
 	public void fromJson(JsonObject deviceNode){
@@ -38,14 +38,14 @@ public class SecurityDevice {
 				attachmentPointInfo.setAttchmentPoint(inAPNode.get("ap").getAsString());
 			setIngressAttachmentPointInfo(attachmentPointInfo);
 		}
-		if(deviceNode.has("outgress")){
-			JsonObject outAPNode = deviceNode.get("outgress").getAsJsonObject();
+		if(deviceNode.has("egress")){
+			JsonObject outAPNode = deviceNode.get("egress").getAsJsonObject();
 			AttachmentPointInfo attachmentPointInfo = new AttachmentPointInfo();
 			if(outAPNode.has("mac"))
 				attachmentPointInfo.setMac(HexString.fromHexString(outAPNode.get("mac").getAsString()));
 			if(outAPNode.has("ap"))
 				attachmentPointInfo.setAttchmentPoint(outAPNode.get("ap").getAsString());
-			setOutgressAttachmentPointInfo(attachmentPointInfo);
+			setEgressAttachmentPointInfo(attachmentPointInfo);
 		}
 	}
 
@@ -81,19 +81,19 @@ public class SecurityDevice {
 		this.ingressAttachmentPointInfo = ingressAttachmentPointInfo;
 	}
 
-	public AttachmentPointInfo getOutgressAttachmentPointInfo() {
-		return outgressAttachmentPointInfo;
+	public AttachmentPointInfo getEgressAttachmentPointInfo() {
+		return egressAttachmentPointInfo;
 	}
 
-	public void setOutgressAttachmentPointInfo(AttachmentPointInfo outgressAttachmentPointInfo) {
-		this.outgressAttachmentPointInfo = outgressAttachmentPointInfo;
+	public void setEgressAttachmentPointInfo(AttachmentPointInfo egressAttachmentPointInfo) {
+		this.egressAttachmentPointInfo = egressAttachmentPointInfo;
 	}
 
 	@Override
 	public String toString() {
 		return "SecurityDevice [deviceKey=" + deviceKey + ", deviceName="
 				+ deviceName + ", deviceTag=" + deviceTag + ", inAP="
-				+ ingressAttachmentPointInfo + ", outAP=" + outgressAttachmentPointInfo + "]";
+				+ ingressAttachmentPointInfo + ", outAP=" + egressAttachmentPointInfo + "]";
 	}
 	
 }

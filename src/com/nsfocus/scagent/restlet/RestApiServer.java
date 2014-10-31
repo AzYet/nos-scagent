@@ -72,6 +72,7 @@ public class RestApiServer extends ServerResource {
 
     @Get("json")
     public String getPolicyCommands() {
+        logger.info("REST: Getting {} ",getReference().getPath());
         String op = (String) getRequestAttributes().get("op");
         Form form = getQuery();
         Gson gson = new Gson();
@@ -79,6 +80,7 @@ public class RestApiServer extends ServerResource {
             HashSet<PolicyCommand> res = new HashSet<PolicyCommand>();
             String type = form.getFirstValue("type");
             if (type == null) {
+                logger.info("REST: Get all policy");
                 //return all policy Commands
                 for (Map.Entry<String, PolicyCommandDeployed> pde : policyCommandsDeployed.entrySet()) {
                     PolicyCommand policyCommand = pde.getValue().getPolicyCommand();
@@ -90,6 +92,7 @@ public class RestApiServer extends ServerResource {
 
             }
             else if (op.equalsIgnoreCase("byod-allow")) {
+                logger.info("REST: Get byod-allow policy");
                 for (PolicyCommand p : allowPolicies.values()) {
                     if (p.getType() == PolicyActionType.BYOD_ALLOW) {
                         res.add(p);
@@ -124,6 +127,7 @@ public class RestApiServer extends ServerResource {
 
     @Delete
     public String deletePolicyCommand() {
+        logger.info("REST: Deleting {} ",getReference().getPath());
         String id = (String) getRequestAttributes().get("id");
         if (id == null)
             return String.format("{\"status\" : \"error\", \"result\" : \"%s\"}", "param error");
@@ -158,12 +162,14 @@ public class RestApiServer extends ServerResource {
 
 	@Post
 	public Representation handlePostRequest(Representation entity) {
+        logger.info("REST: Posting {} ",getReference().getPath());
         String op = (String) getRequestAttributes().get("op");
         Gson gson = new Gson();
         Representation result = null;
         String text = null;
         try {
             text = entity.getText();
+            logger.info(text);
         } catch (IOException e) {
             e.printStackTrace();
             HashMap<String, String> res = new HashMap<String, String>();
@@ -329,11 +335,11 @@ public class RestApiServer extends ServerResource {
                 SecurityDevice deviceStart = policyCommand.getDevices().get(i);
                 SecurityDevice deviceEnd = policyCommand.getDevices().get(i + 1);
                 List<DpidPortPair> path = scAgentDriver.computeRoute(
-                        getAttachmentPoint(deviceStart.getOutgressAttachmentPointInfo()),
+                        getAttachmentPoint(deviceStart.getEgressAttachmentPointInfo()),
                         getAttachmentPoint(deviceEnd.getIngressAttachmentPointInfo()));
                 if (path == null || path.size() < 1) {
                     logger.error("routeEngine cannot find a path from {} to {}",
-                            deviceStart.getOutgressAttachmentPointInfo().toString(),
+                            deviceStart.getEgressAttachmentPointInfo().toString(),
                             deviceEnd.getIngressAttachmentPointInfo().toString());
                     return "cannot find  a path ";
                 }
@@ -420,7 +426,7 @@ public class RestApiServer extends ServerResource {
                             .getPolicyCommnd().getDevices();
                     DpidPortPair startPoint = getAttachmentPoint(devicesOfPrePolicy
                             .get(devicesOfPrePolicy.size() - 1)
-                            .getOutgressAttachmentPointInfo());
+                            .getEgressAttachmentPointInfo());
                     DpidPortPair endPoint = getAttachmentPoint(removed
                             .getPolicyCommnd().getDevices().get(0)
                             .getIngressAttachmentPointInfo());
@@ -433,7 +439,7 @@ public class RestApiServer extends ServerResource {
                                 "routeEngine cannot find a path from {} to {}",
                                 devicesOfPrePolicy
                                         .get(devicesOfPrePolicy.size() - 1)
-                                        .getOutgressAttachmentPointInfo()
+                                        .getEgressAttachmentPointInfo()
                                         .toString(), policyCommand.getDevices()
                                         .get(0).getIngressAttachmentPointInfo()
                                         .toString());
@@ -477,7 +483,7 @@ public class RestApiServer extends ServerResource {
                         .getPolicyCommnd().getDevices();
                 DpidPortPair startPoint = getAttachmentPoint(devicesOfPrePolicy
                         .get(devicesOfPrePolicy.size() - 1)
-                        .getOutgressAttachmentPointInfo());
+                        .getEgressAttachmentPointInfo());
                 if (policyCommand.getType().equals(PolicyActionType.DROP_FLOW)) {
                     DpidPortPair npt = new DpidPortPair(
                             startPoint.getDpid(), startPoint.getPort());
@@ -503,7 +509,7 @@ public class RestApiServer extends ServerResource {
                             "routeEngine cannot find a path from {} to {}",
                             devicesOfPrePolicy
                                     .get(devicesOfPrePolicy.size() - 1)
-                                    .getOutgressAttachmentPointInfo()
+                                    .getEgressAttachmentPointInfo()
                                     .toString(), policyCommand.getDevices()
                                     .get(0).getIngressAttachmentPointInfo()
                                     .toString());
@@ -577,9 +583,7 @@ public class RestApiServer extends ServerResource {
                 match = policyCommand.getMatch();
             List<SecurityDevice> devicesOfPrePolicy = policyCommand
                     .getDevices();
-            DpidPortPair startPoint = getAttachmentPoint(devicesOfPrePolicy.get(
-                    devicesOfPrePolicy.size() - 1)
-                    .getOutgressAttachmentPointInfo());
+            DpidPortPair startPoint = getAttachmentPoint(devicesOfPrePolicy.get(devicesOfPrePolicy.size() - 1).getEgressAttachmentPointInfo());
             DpidPortPair endPoint = getAttachmentPoint(policyPosterior
                     .getPolicyCommnd().getDevices().get(0)
                     .getIngressAttachmentPointInfo());
@@ -623,11 +627,18 @@ public class RestApiServer extends ServerResource {
 
 
     private DpidPortPair getAttachmentPoint(AttachmentPointInfo attachmentPointInfo) {
-        //TODO:
+        if (attachmentPointInfo.getAttchmentPoint() != null && !attachmentPointInfo.getAttchmentPoint().isEmpty()) {
+            String[] split = attachmentPointInfo.getAttchmentPoint().split(":");
+            if (split.length == 2) {
+                return new DpidPortPair(Long.parseLong(split[0]), Integer.parseInt(split[1]));
+            }
+        }
         byte[] mac = attachmentPointInfo.getMac();
-        String toString = MACAddress.valueOf(mac).toString();
-        return  DeviceManager.getInstance().findHostByMac(toString);
-
+        if (mac != null) {
+            String toString = MACAddress.valueOf(mac).toString();
+            return DeviceManager.getInstance().findHostByMac(toString);
+        }
+        return null;
     }
 
     public void addImplicitPolicyCommandDeployed(DpidPortPair sp,
@@ -661,7 +672,7 @@ public class RestApiServer extends ServerResource {
             policyCommandImplicit.setMatch(new MatchArguments());
             SecurityDevice device = new SecurityDevice();
             if (priority > 0) {
-                device.setOutgressAttachmentPointInfo(apInfo);
+                device.setEgressAttachmentPointInfo(apInfo);
             } else {
                 device.setIngressAttachmentPointInfo(apInfo);
             }

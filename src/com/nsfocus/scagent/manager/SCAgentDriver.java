@@ -222,8 +222,12 @@ public class SCAgentDriver implements ISCAgentDriver {
             return;
         if (action.getOutput() != null && action.getOutput().size() > 0) {
             for (int o : action.getOutput()) {
-                flowModifier.addOutputAction(o, 65535);
+                if(o==OFPConstant.OFPort.CONTROLLER)
+                    flowModifier.addOutputAction(o, 65535);
+                else
+                    flowModifier.addOutputAction(o, 0);
             }
+
         }
         if (!Arrays.equals(new byte[6], action.getDlSrc())) {
             long srcMac = MACAddress.valueOf(action.getDlSrc()).toLong();
